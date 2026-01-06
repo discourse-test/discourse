@@ -283,7 +283,7 @@ class PostsController < ApplicationController
     # Accept either ?bypass_bump=true or post[bypass_bump]=true
     if params.key?(:bypass_bump) || (params[:post] && params[:post].key?(:bypass_bump))
       opts[:bypass_bump] = ActiveModel::Type::Boolean.new.cast(
-        params[:bypass_bump].presence || params.dig(:post, :bypass_bump)
+        params[:bypass_bump].presence || params.dig(:post, :bypass_bump),
       )
     end
 

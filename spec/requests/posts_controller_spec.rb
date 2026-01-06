@@ -643,6 +643,58 @@ RSpec.describe PostsController do
         expect(response.status).to eq(200)
         expect(post.topic.reload.bumped_at).to eq_time(created_at)
       end
+
+      describe "bypass_bump parameter" do
+        fab!(:wiki_post) { Fabricate(:post, user: user, wiki: true) }
+
+        before { wiki_post.topic.update!(bumped_at: 1.day.ago) }
+
+        it "does not bump the topic when bypass_bump=true (top-level param)" do
+          expect {
+            put "/posts/#{wiki_post.id}.json",
+                params: {
+                  bypass_bump: true,
+                  post: {
+                    raw: "updated content here",
+                  },
+                }
+            expect(response.status).to eq(200)
+          }.not_to change { wiki_post.topic.reload.bumped_at }
+        end
+
+        it "does not bump the topic when bypass_bump=true (nested under post)" do
+          expect {
+            put "/posts/#{wiki_post.id}.json",
+                params: {
+                  post: {
+                    raw: "updated content here",
+                    bypass_bump: true,
+                  },
+                }
+            expect(response.status).to eq(200)
+          }.not_to change { wiki_post.topic.reload.bumped_at }
+        end
+
+        it "bumps the topic when bypass_bump is not provided" do
+          expect {
+            put "/posts/#{wiki_post.id}.json", params: { post: { raw: "updated content here" } }
+            expect(response.status).to eq(200)
+          }.to change { wiki_post.topic.reload.bumped_at }
+        end
+
+        it "bumps the topic when bypass_bump=false" do
+          expect {
+            put "/posts/#{wiki_post.id}.json",
+                params: {
+                  bypass_bump: false,
+                  post: {
+                    raw: "updated content here",
+                  },
+                }
+            expect(response.status).to eq(200)
+          }.to change { wiki_post.topic.reload.bumped_at }
+        end
+      end
     end
 
     describe "when logged in as group moderator" do
