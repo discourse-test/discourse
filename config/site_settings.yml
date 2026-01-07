@@ -2730,6 +2730,11 @@ security:
     list_type: compact
     requires_confirmation: "simple"
   slow_down_crawler_rate: 60
+  llms_txt:
+    default: ""
+    type: upload
+    accepted_extensions: ".txt"
+    max_file_size_kb: 512
   content_security_policy:
     default: true
   content_security_policy_report_only:
