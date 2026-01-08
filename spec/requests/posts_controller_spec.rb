@@ -645,54 +645,83 @@ RSpec.describe PostsController do
       end
 
       describe "bypass_bump parameter" do
-        fab!(:wiki_post) { Fabricate(:post, user: user, wiki: true) }
+        fab!(:wiki_post) { Fabricate(:post, user:, wiki: true) }
 
         before { wiki_post.topic.update!(bumped_at: 1.day.ago) }
 
-        it "does not bump the topic when bypass_bump=true (top-level param)" do
+        it "prevents bumping when bypass_bump=true" do
           expect {
             put "/posts/#{wiki_post.id}.json",
                 params: {
                   bypass_bump: true,
                   post: {
-                    raw: "updated content here",
+                    raw: "updated content",
                   },
                 }
-            expect(response.status).to eq(200)
           }.not_to change { wiki_post.topic.reload.bumped_at }
+          expect(response.status).to eq(200)
         end
 
-        it "does not bump the topic when bypass_bump=true (nested under post)" do
+        it "accepts bypass_bump nested under post param" do
           expect {
             put "/posts/#{wiki_post.id}.json",
                 params: {
                   post: {
-                    raw: "updated content here",
+                    raw: "updated content",
                     bypass_bump: true,
                   },
                 }
-            expect(response.status).to eq(200)
           }.not_to change { wiki_post.topic.reload.bumped_at }
+          expect(response.status).to eq(200)
         end
 
         it "bumps the topic when bypass_bump is not provided" do
           expect {
-            put "/posts/#{wiki_post.id}.json", params: { post: { raw: "updated content here" } }
-            expect(response.status).to eq(200)
+            put "/posts/#{wiki_post.id}.json", params: { post: { raw: "updated content" } }
           }.to change { wiki_post.topic.reload.bumped_at }
+          expect(response.status).to eq(200)
         end
 
-        it "bumps the topic when bypass_bump=false" do
-          expect {
-            put "/posts/#{wiki_post.id}.json",
-                params: {
-                  bypass_bump: false,
-                  post: {
-                    raw: "updated content here",
-                  },
-                }
+        context "as TL4 user" do
+          fab!(:tl4_user, :trust_level_4)
+          before { sign_in(tl4_user) }
+
+          it "prevents bumping when bypass_bump=true" do
+            expect {
+              put "/posts/#{wiki_post.id}.json",
+                  params: {
+                    bypass_bump: true,
+                    post: {
+                      raw: "updated content",
+                    },
+                  }
+            }.not_to change { wiki_post.topic.reload.bumped_at }
             expect(response.status).to eq(200)
-          }.to change { wiki_post.topic.reload.bumped_at }
+          end
+        end
+
+        context "as regular user" do
+          fab!(:old_wiki_post) do
+            Fabricate(:post, user:, wiki: true, last_version_at: 10.minutes.ago)
+          end
+
+          before do
+            sign_in(user)
+            old_wiki_post.topic.update!(bumped_at: 1.day.ago)
+          end
+
+          it "ignores bypass_bump (topic still bumps)" do
+            expect {
+              put "/posts/#{old_wiki_post.id}.json",
+                  params: {
+                    bypass_bump: true,
+                    post: {
+                      raw: "updated content",
+                    },
+                  }
+            }.to change { old_wiki_post.topic.reload.bumped_at }
+            expect(response.status).to eq(200)
+          end
         end
       end
     end
