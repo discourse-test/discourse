@@ -279,9 +279,6 @@ class PostsController < ApplicationController
       opts[:skip_validations] = true
     end
 
-    # Allow privileged API clients to skip bumping the topic when updating a post.
-    # Accept either ?bypass_bump=true or post[bypass_bump]=true
-    # Only staff and TL4 users can bypass bumping (same as reset_bump_date)
     if params.key?(:bypass_bump) || (params[:post] && params[:post].key?(:bypass_bump))
       if guardian.can_update_bumped_at?
         opts[:bypass_bump] = ActiveModel::Type::Boolean.new.cast(
