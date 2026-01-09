@@ -177,6 +177,10 @@
           background-origin: content-box;
           background-clip: content-box;
 
+          &.--bg-size-cover {
+            background-size: cover;
+          }
+
           .meta {
             display: none;
           }
@@ -244,6 +248,12 @@
             text-align: center;
             color: var(--primary-high);
           }
+        }
+
+        &__restrictions {
+          font-size: var(--font-down-1);
+          color: var(--primary-medium);
+          margin-top: 0.25em;
         }
       }
     }

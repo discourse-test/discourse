@@ -16,6 +16,60 @@ import { authorizesOneOrMoreExtensions, isImage } from "discourse/lib/uploads";
 import UppyUpload from "discourse/lib/uppy/uppy-upload";
 import { i18n } from "discourse-i18n";
 
+const BACKGROUND_SIZE_COVER_SETTINGS = ["welcome_banner_image"];
+
+const ImagePreview = <template>
+  <a
+    {{@applyLightbox}}
+    href={{@cdnUrl}}
+    title={{@fileName}}
+    rel="nofollow ugc noopener"
+    class="lightbox"
+  >
+    <div class="meta">
+      <span class="informations">
+        {{#if @width}}
+          {{@width}}x{{@height}}
+        {{/if}}
+        {{@filesize}}
+      </span>
+    </div>
+  </a>
+
+  <div class="expand-overlay">
+    <DButton
+      @action={{@onToggleLightbox}}
+      @icon="discourse-expand"
+      @title="expand"
+      class="btn-default btn-small file-uploader-lightbox-btn"
+    />
+  </div>
+</template>;
+
+const FilePreview = <template>
+  <div class="file-info">
+    <div class="file-icon">
+      {{icon "file"}}
+    </div>
+    <div class="file-details">
+      <span class="file-name">{{@fileName}}</span>
+      {{#if @filesize}}
+        <span class="file-size">{{@filesize}}</span>
+      {{/if}}
+    </div>
+    <a
+      href={{@cdnUrl}}
+      download={{@fileName}}
+      target="_blank"
+      rel="nofollow ugc noopener noreferrer"
+      class="btn btn-default btn-small download-btn"
+      title={{i18n "admin.site_settings.download_file"}}
+    >
+      {{icon "download"}}
+    </a>
+  </div>
+</template>;
+
 export default class SiteSettingUpload extends Component {
   @service currentUser;
   @service siteSettings;
@@ -67,8 +121,18 @@ export default class SiteSettingUpload extends Component {
       : { imagesOnly: true };
   }
 
+  formatExtensions(separator = ", ") {
+    return this.args.setting.accepted_extensions
+      .split("|")
+      .map((ext) => `.${ext}`)
+      .join(separator);
+  }
+
   get acceptedFormats() {
-    return this.args.setting.accepted_extensions || "image/*";
+    if (this.args.setting.accepted_extensions) {
+      return this.formatExtensions(",");
+    }
+    return "image/*";
   }
 
   get isImageFile() {
@@ -102,6 +166,12 @@ export default class SiteSettingUpload extends Component {
 
   get fileCdnUrl() {
     return this.args.value ? getURLWithCDN(this.args.value) : "";
+  }
+
+  get previewSizeClass() {
+    return BACKGROUND_SIZE_COVER_SETTINGS.includes(this.args.setting.setting)
+      ? "--bg-size-cover"
+      : "";
   }
 
   get backgroundStyle() {
@@ -146,6 +216,29 @@ export default class SiteSettingUpload extends Component {
       : htmlSafe("");
   }
 
+  get restrictionsInfo() {
+    const parts = [];
+
+    if (this.args.setting.accepted_extensions) {
+      parts.push(
+        i18n("admin.site_settings.upload_restrictions.extensions", {
+          extensions: this.formatExtensions(),
+        })
+      );
+    }
+
+    if (this.args.setting.max_file_size_kb) {
+      const sizeKb = this.args.setting.max_file_size_kb;
+      const size =
+        sizeKb >= 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb} KB`;
+      parts.push(
+        i18n("admin.site_settings.upload_restrictions.max_size", { size })
+      );
+    }
+
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }
+
   @action
   toggleLightbox() {
     const link = document.querySelector(`#${this.settingId} a.lightbox`);
@@ -179,7 +272,10 @@ export default class SiteSettingUpload extends Component {
       }}
     >
       <div
-        class="uploaded-file-preview input-xxlarge"
+        class={{concatClass
+          "uploaded-file-preview input-xxlarge"
+          this.previewSizeClass
+        }}
         style={{this.backgroundStyle}}
       >
         {{#if this.showPlaceholder}}
@@ -191,51 +287,21 @@ export default class SiteSettingUpload extends Component {
 
         {{#if @value}}
           {{#if this.isImageFile}}
-            <a
-              {{this.applyLightbox}}
-              href={{this.fileCdnUrl}}
-              title={{this.fileName}}
-              rel="nofollow ugc noopener"
-              class="lightbox"
-            >
-              <div class="meta">
-                <span class="informations">
-                  {{#if this.imageWidth}}
-                    {{this.imageWidth}}x{{this.imageHeight}}
-                  {{/if}}
-                  {{this.filesize}}
-                </span>
-              </div>
-            </a>
-
-            <div class="expand-overlay">
-              <DButton
-                @action={{this.toggleLightbox}}
-                @icon="discourse-expand"
-                @title="expand"
-                class="btn-default btn-small file-uploader-lightbox-btn"
-              />
-            </div>
+            <ImagePreview
+              @applyLightbox={{this.applyLightbox}}
+              @cdnUrl={{this.fileCdnUrl}}
+              @fileName={{this.fileName}}
+              @filesize={{this.filesize}}
+              @width={{this.imageWidth}}
+              @height={{this.imageHeight}}
+              @onToggleLightbox={{this.toggleLightbox}}
+            />
           {{else}}
-            <div class="file-info">
-              <div class="file-icon">
-                {{icon "file"}}
-              </div>
-              <div class="file-details">
-                <span class="file-name">{{this.fileName}}</span>
-                {{#if this.filesize}}
-                  <span class="file-size">{{this.filesize}}</span>
-                {{/if}}
-              </div>
-              <a
-                href={{this.fileCdnUrl}}
-                download={{this.fileName}}
-                class="btn btn-default btn-small download-btn"
-                title={{i18n "admin.site_settings.download_file"}}
-              >
-                {{icon "download"}}
-              </a>
-            </div>
+            <FilePreview
+              @cdnUrl={{this.fileCdnUrl}}
+              @fileName={{this.fileName}}
+              @filesize={{this.filesize}}
+            />
           {{/if}}
         {{else}}
           <div class="file-upload-controls">
@@ -279,6 +345,12 @@ export default class SiteSettingUpload extends Component {
           </div>
         {{/if}}
       </div>
+
+      {{#if this.restrictionsInfo}}
+        <div class="file-uploader__restrictions">
+          {{this.restrictionsInfo}}
+        </div>
+      {{/if}}
 
       {{#if @value}}
         <div class="file-upload-controls">

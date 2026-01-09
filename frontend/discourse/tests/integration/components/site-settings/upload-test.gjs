@@ -34,7 +34,7 @@ module("Integration | Component | site-settings/upload", function (hooks) {
   test("with non-image file shows file info and download link", async function (assert) {
     const setting = {
       setting: "llms_txt",
-      accepted_extensions: ".txt",
+      accepted_extensions: "txt",
       upload: {
         original_filename: "my-llms-file.txt",
         human_filesize: "4.68 KB",
@@ -68,6 +68,16 @@ module("Integration | Component | site-settings/upload", function (hooks) {
         "download",
         "my-llms-file.txt",
         "triggers download vs navigation"
+      );
+    assert
+      .dom(".download-btn")
+      .hasAttribute("target", "_blank", "opens in new tab");
+    assert
+      .dom(".download-btn")
+      .hasAttribute(
+        "rel",
+        "nofollow ugc noopener noreferrer",
+        "security attributes present"
       );
     assert.dom(".lightbox").doesNotExist("no preview for non-images");
   });
@@ -129,7 +139,7 @@ module("Integration | Component | site-settings/upload", function (hooks) {
   });
 
   test("uses accepted_extensions when specified", async function (assert) {
-    const setting = { setting: "llms_txt", accepted_extensions: ".txt" };
+    const setting = { setting: "llms_txt", accepted_extensions: "txt|json" };
 
     await render(
       <template>
@@ -143,7 +153,11 @@ module("Integration | Component | site-settings/upload", function (hooks) {
 
     assert
       .dom("[id$='__input']")
-      .hasAttribute("accept", ".txt", "respects setting configuration");
+      .hasAttribute(
+        "accept",
+        ".txt,.json",
+        "converts pipe-separated extensions to HTML accept format"
+      );
   });
 
   test("delete button calls changeValueCallback with null", async function (assert) {
@@ -164,5 +178,69 @@ module("Integration | Component | site-settings/upload", function (hooks) {
     await click(".btn-danger");
 
     assert.strictEqual(callbackValue, null, "signals removal to parent");
+  });
+
+  test("shows upload restrictions when configured", async function (assert) {
+    const setting = {
+      setting: "llms_txt",
+      accepted_extensions: "txt|json",
+      max_file_size_kb: 512,
+    };
+
+    await render(
+      <template>
+        <SiteSettingUpload
+          @setting={{setting}}
+          @value=""
+          @changeValueCallback={{this.noop}}
+        />
+      </template>
+    );
+
+    assert
+      .dom(".file-uploader__restrictions")
+      .exists("displays restrictions info when configured");
+    assert
+      .dom(".file-uploader__restrictions")
+      .includesText(".txt", "shows accepted extensions");
+    assert
+      .dom(".file-uploader__restrictions")
+      .includesText("512 KB", "shows max file size");
+  });
+
+  test("does not show restrictions for default image uploads", async function (assert) {
+    const setting = { setting: "logo" };
+
+    await render(
+      <template>
+        <SiteSettingUpload
+          @setting={{setting}}
+          @value=""
+          @changeValueCallback={{this.noop}}
+        />
+      </template>
+    );
+
+    assert
+      .dom(".file-uploader__restrictions")
+      .doesNotExist("no restrictions for standard image uploads");
+  });
+
+  test("applies background-size cover for welcome_banner_image", async function (assert) {
+    const setting = { setting: "welcome_banner_image" };
+
+    await render(
+      <template>
+        <SiteSettingUpload
+          @setting={{setting}}
+          @value="/images/banner.png"
+          @changeValueCallback={{this.noop}}
+        />
+      </template>
+    );
+
+    assert
+      .dom(".uploaded-file-preview")
+      .hasClass("--bg-size-cover", "banner images use cover sizing");
   });
 });

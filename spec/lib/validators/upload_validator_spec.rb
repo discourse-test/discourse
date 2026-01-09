@@ -118,7 +118,7 @@ RSpec.describe UploadValidator do
             .type_supervisor
             .stubs(:type_hash)
             .with(:test_setting)
-            .returns({ type: "upload", accepted_extensions: ".txt,.md" })
+            .returns({ type: "upload", accepted_extensions: "txt|md" })
         end
 
         it "allows matching extensions" do
@@ -133,7 +133,7 @@ RSpec.describe UploadValidator do
           upload.original_filename = "script.js"
           validator.validate(upload)
           expect(upload.errors[:original_filename]).to include(
-            I18n.t("upload.unauthorized", authorized_extensions: ".txt,.md"),
+            I18n.t("upload.unauthorized", authorized_extensions: "txt|md"),
           )
         end
 
@@ -150,7 +150,7 @@ RSpec.describe UploadValidator do
             .type_supervisor
             .stubs(:type_hash)
             .with(:test_setting)
-            .returns({ type: "upload", accepted_extensions: ".png" })
+            .returns({ type: "upload", accepted_extensions: "png" })
           SiteSetting.max_image_size_kb = 1
           upload.original_filename = "image.png"
           upload.filesize = 10.kilobytes
@@ -187,7 +187,7 @@ RSpec.describe UploadValidator do
             .type_supervisor
             .stubs(:type_hash)
             .with(:limited_upload)
-            .returns({ type: "upload", accepted_extensions: ".txt", max_file_size_kb: 5 })
+            .returns({ type: "upload", accepted_extensions: "txt", max_file_size_kb: 5 })
           upload.filesize = 10.kilobytes
           validator.validate(upload)
           expect(upload.errors[:filesize]).to be_present
@@ -198,7 +198,7 @@ RSpec.describe UploadValidator do
             .type_supervisor
             .stubs(:type_hash)
             .with(:limited_upload)
-            .returns({ type: "upload", accepted_extensions: ".txt", max_file_size_kb: 100 })
+            .returns({ type: "upload", accepted_extensions: "txt", max_file_size_kb: 100 })
           upload.filesize = 50.kilobytes
           expect(validator.validate(upload)).to eq(true)
         end
@@ -209,7 +209,7 @@ RSpec.describe UploadValidator do
             .type_supervisor
             .stubs(:type_hash)
             .with(:limited_upload)
-            .returns({ type: "upload", accepted_extensions: ".txt", max_file_size_kb: 100 })
+            .returns({ type: "upload", accepted_extensions: "txt", max_file_size_kb: 100 })
           upload.filesize = 50.kilobytes
           expect(validator.validate(upload)).to eq(true)
         end

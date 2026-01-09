@@ -60,6 +60,7 @@ class UploadValidator < ActiveModel::Validator
         upload.errors.add(:original_filename, I18n.t("upload.images_only"))
         return false
       end
+
       validate_site_setting_file_size(upload, setting_opts)
     end
 
@@ -127,10 +128,7 @@ class UploadValidator < ActiveModel::Validator
   end
 
   def extension_allowed_for_site_setting?(extension, accepted_extensions)
-    allowed =
-      accepted_extensions.split(",").map { |ext| ext.strip.delete_prefix(".").downcase }.to_set
-
-    allowed.include?(extension.downcase)
+    extensions_to_set(accepted_extensions).include?(extension.downcase)
   end
 
   def extensions_to_set(exts)
