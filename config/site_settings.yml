@@ -21,6 +21,11 @@
 #                         is changed.
 # themeable             - Set to true if themes can override this site setting. Generally, only client side affecting settings
 #                         that change the UI should be themeable, and try limit to simple setting types like bool, list, integer, enum.
+# upcoming_change       - Additional metadata with the following options to show in the /admin/config/upcoming-changes page:
+#                          - status: experimental | alpha | beta | stable
+#                          - impact: two parts separated by comma - feature|other , staff|admins|moderators|all_members|developers
+#                          - learn_more_url: a url for more information
+#
 #
 #
 # type: email                 - Must be a valid email address.
@@ -1895,27 +1900,9 @@ email:
       - X-Spam-Status
       - X-SES-Spam-Verdict
     area: "email"
-  enable_imap:
-    default: false
-    client: true
-    hidden: true
-  enable_imap_write:
-    default: false
-    hidden: true
-  enable_imap_idle:
-    default: false
-    hidden: true
   enable_smtp:
     default: false
     client: true
-  imap_polling_period_mins:
-    default: 5
-  imap_polling_old_emails:
-    default: 1000
-  imap_polling_new_emails:
-    default: 250
-  imap_batch_import_email:
-    default: 100
   email_prefix:
     default: ""
     area: "email"
@@ -4219,3 +4206,10 @@ experimental:
     default: false
     hidden: true
     client: true
+  floating_dismiss_topics_on_mobile:
+    default: false
+    hidden: true
+    client: true
+    upcoming_change:
+      status: "experimental"
+      impact: "feature,all_members"
