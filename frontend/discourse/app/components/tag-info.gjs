@@ -89,8 +89,11 @@ export default class TagInfo extends Component {
       return;
     }
     this.set("loading", true);
+    const findArgs = this.tag.id
+      ? `${this.tag.slug || this.tag.name}/${this.tag.id}`
+      : this.tag.name;
     return this.store
-      .find("tag-info", this.tag.name)
+      .find("tag-info", findArgs)
       .then((result) => {
         this.set("tagInfo", result);
         this.set(
@@ -121,7 +124,8 @@ export default class TagInfo extends Component {
   @action
   unlinkSynonym(tag, event) {
     event?.preventDefault();
-    ajax(`/tag/${this.tagInfo.name}/synonyms/${tag.name}`, {
+    const slug = this.tagInfo.slug || this.tagInfo.name;
+    ajax(`/tag/${slug}/${this.tagInfo.id}/synonyms/${tag.name}.json`, {
       type: "DELETE",
     })
       .then(() => removeValueFromArray(this.tagInfo.synonyms, tag))
@@ -169,9 +173,10 @@ export default class TagInfo extends Component {
         this.tagInfo.set("description", this.newTagDescription);
 
         if (result.responseJson.tag) {
-          const newTagName = result.responseJson.tag.name;
-          if (oldTagName !== newTagName) {
-            this.router.transitionTo("tag.show", newTagName);
+          const newTag = result.responseJson.tag;
+          if (oldTagName !== newTag.name) {
+            const slugForUrl = newTag.slug || `${newTag.id}-tag`;
+            this.router.transitionTo("tag.show", slugForUrl, newTag.id);
           }
         }
       })
@@ -219,7 +224,8 @@ export default class TagInfo extends Component {
         })
       ),
       didConfirm: () => {
-        return ajax(`/tag/${this.tagInfo.name}/synonyms`, {
+        const slug = this.tagInfo.slug || this.tagInfo.name;
+        return ajax(`/tag/${slug}/${this.tagInfo.id}/synonyms.json`, {
           type: "POST",
           data: {
             tags: this.newSynonyms.map((t) =>
