@@ -3389,6 +3389,32 @@ RSpec.describe Topic do
     end
   end
 
+  describe ".reset_highest" do
+    fab!(:topic)
+    fab!(:first_post) { Fabricate(:post, topic: topic, post_number: 1) }
+
+    it "returns the highest post number" do
+      Fabricate(:post, topic: topic, post_number: 2)
+      third_post = Fabricate(:post, topic: topic, post_number: 3)
+
+      expect(Topic.reset_highest(topic.id)).to eq(third_post.post_number)
+    end
+
+    it "excludes deleted posts from the highest post number" do
+      Fabricate(:post, topic: topic, post_number: 2)
+      Fabricate(:post, topic: topic, post_number: 3, deleted_at: 1.hour.ago)
+
+      expect(Topic.reset_highest(topic.id)).to eq(2)
+    end
+
+    it "excludes whisper posts from the highest post number" do
+      Fabricate(:post, topic: topic, post_number: 2)
+      Fabricate(:post, topic: topic, post_number: 3, post_type: Post.types[:whisper])
+
+      expect(Topic.reset_highest(topic.id)).to eq(2)
+    end
+  end
+
   describe "#access_topic_via_group" do
     let(:open_group) { Fabricate(:group, public_admission: true) }
     let(:request_group) do
