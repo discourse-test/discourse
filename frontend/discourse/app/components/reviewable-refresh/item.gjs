@@ -156,19 +156,16 @@ export default class ReviewableItem extends Component {
     "reviewable.status",
     "claimOptional",
     "claimRequired",
-    "reviewable.claimed_by",
-    "siteSettings.reviewable_old_moderator_actions"
+    "reviewable.claimed_by"
   )
   displayContextQuestion(
     createdFromFlag,
     status,
     claimOptional,
     claimRequired,
-    claimedBy,
-    oldModeratorActions
+    claimedBy
   ) {
     return (
-      oldModeratorActions &&
       createdFromFlag &&
       status === 0 &&
       (claimOptional || (claimRequired && claimedBy !== null))

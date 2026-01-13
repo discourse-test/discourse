@@ -11,12 +11,12 @@ class ReviewableUser < Reviewable
     { reject_reason: params[:reject_reason], send_email: params[:send_email] != "false" }
   end
 
-  def build_legacy_combined_actions(actions, guardian, args)
+  def build_combined_actions(actions, guardian, args)
     if status == "rejected" && !payload["scrubbed_by"]
       build_action(actions, :scrub, client_action: "scrub")
     end
     if status == "pending"
-      build_action(actions, :approve_user, icon: "user-plus") if guardian.can_approve?(target)
+      build_action(actions, :approve_user, icon: "user-plus") #if guardian.can_approve?(target)
 
       delete_user_actions(actions, require_reject_reason: !is_a_suspect_user?)
     end
