@@ -7548,9 +7548,6 @@ packages:
   preact@10.12.1:
     resolution: {integrity: sha512-l8386ixSsBdbreOAkqtrwqHwdvR35ID8c3rKPa8lCWuO86dBi32QWHV4vfsZK1utLLFMvw+Z5Ad4XLkZzchscg==}
 
-  preact@10.23.2:
-    resolution: {integrity: sha512-kKYfePf9rzKnxOAKDpsWhg/ysrHPqT+yQ7UW4JjdnqjFIeNUnNcEJvhuA8fDenxAGWzUqtd51DfVg7xp/8T9NA==}
-
   preact@10.28.2:
     resolution: {integrity: sha512-lbteaWGzGHdlIuiJ0l2Jq454m6kcpI1zNje6d8MlGAFlYvP2GO4ibnat7P74Esfz4sPTdM6UxtTwh/d3pwM9JA==}
 
@@ -11816,7 +11813,7 @@ snapshots:
       mime-match: 1.0.2
       namespace-emitter: 2.0.1
       nanoid: 5.0.8
-      preact: 10.23.2
+      preact: 10.28.2
 
   '@uppy/drop-target@3.0.1(@uppy/core@4.2.2)':
     dependencies:
@@ -17394,8 +17391,6 @@ snapshots:
       source-map-js: 1.2.1
 
   preact@10.12.1: {}
-
-  preact@10.23.2: {}
 
   preact@10.28.2: {}
 
