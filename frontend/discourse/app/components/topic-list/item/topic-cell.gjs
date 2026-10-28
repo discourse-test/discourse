@@ -1,0 +1,149 @@
+import Component from "@glimmer/component";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import ActionList from "discourse/components/topic-list/action-list";
+import NewRepliesDot from "discourse/components/topic-list/new-replies-dot";
+import ParticipantGroups from "discourse/components/topic-list/participant-groups";
+import TopicExcerpt from "discourse/components/topic-list/topic-excerpt";
+import TopicLink from "discourse/components/topic-list/topic-link";
+import UnreadIndicator from "discourse/components/topic-list/unread-indicator";
+import TopicPostBadges from "discourse/components/topic-post-badges";
+import TopicStatus from "discourse/components/topic-status";
+import lazyHash from "discourse/helpers/lazy-hash";
+import topicFeaturedLink from "discourse/helpers/topic-featured-link";
+import { groupPath } from "discourse/lib/url";
+import dCategoryLink from "discourse/ui-kit/helpers/d-category-link";
+import dDiscourseTags from "discourse/ui-kit/helpers/d-discourse-tags";
+
+export default class TopicCell extends Component {
+  get participantGroups() {
+    if (!this.args.topic.get("participant_groups")) {
+      return [];
+    }
+
+    return this.args.topic.get("participant_groups").map((name) => ({
+      name,
+      url: groupPath(name),
+    }));
+  }
+
+  @action
+  onTitleFocus(event) {
+    event.target.closest(".topic-list-item").classList.add("selected");
+  }
+
+  @action
+  onTitleBlur(event) {
+    event.target.closest(".topic-list-item").classList.remove("selected");
+  }
+
+  <template>
+    <td class="main-link topic-list-data" colspan="1">
+      <PluginOutlet
+        @name="topic-list-before-link"
+        @outletArgs={{lazyHash topic=@topic}}
+      />
+
+      <span aria-level="2" class="link-top-line" role="heading">
+        {{~! no whitespace ~}}
+        <PluginOutlet
+          @name="topic-list-before-status"
+          @outletArgs={{lazyHash topic=@topic}}
+        />
+        {{~! no whitespace ~}}
+        <PluginOutlet
+          @name="topic-list-topic-cell-link-top-line"
+          @outletArgs={{lazyHash topic=@topic tagsForUser=@tagsForUser}}
+        >
+          {{~! no whitespace ~}}
+          <TopicStatus @context="topic-list" @topic={{@topic}} />
+          {{~! no whitespace ~}}
+          <TopicLink
+            class="raw-link raw-topic-link"
+            @topic={{@topic}}
+            {{on "focus" this.onTitleFocus}}
+            {{on "blur" this.onTitleBlur}}
+          />
+          {{~#if @topic.featured_link~}}
+            &nbsp;
+            {{~topicFeaturedLink @topic}}
+          {{~/if~}}
+          <PluginOutlet
+            @name="topic-list-after-title"
+            @outletArgs={{lazyHash topic=@topic}}
+          />
+          {{~! no whitespace ~}}
+          <UnreadIndicator @topic={{@topic}} />
+          {{~#if @topic.is_nested_view~}}
+            {{~#if @topic.has_new_replies~}}
+              <NewRepliesDot @topic={{@topic}} />
+            {{~/if~}}
+          {{~else if @showTopicPostBadges~}}
+            <TopicPostBadges
+              @unreadPosts={{@topic.unread_posts}}
+              @unseen={{@topic.unseen}}
+              @url={{@topic.lastUnreadUrl}}
+            />
+          {{~/if~}}
+          <PluginOutlet
+            @name="topic-list-after-badges"
+            @outletArgs={{lazyHash topic=@topic}}
+          />
+        </PluginOutlet>
+      </span>
+
+      <div class="link-bottom-line">
+        <PluginOutlet
+          @name="topic-list-topic-cell-link-bottom-line"
+          @outletArgs={{lazyHash topic=@topic tagsForUser=@tagsForUser}}
+        >
+          <PluginOutlet
+            @name="topic-list-before-category"
+            @outletArgs={{lazyHash topic=@topic}}
+          />
+          {{#unless @hideCategory}}
+            {{#unless @topic.isPinnedUncategorized}}
+              {{dCategoryLink @topic.category}}
+            {{/unless}}
+          {{/unless}}
+          <PluginOutlet
+            @name="topic-list-after-category"
+            @outletArgs={{lazyHash topic=@topic}}
+          />
+
+          <PluginOutlet
+            @name="topic-list-tags-wrapper"
+            @outletArgs={{lazyHash
+              topic=@topic
+              tags=@topic.visibleListTags
+              tagsForUser=@tagsForUser
+            }}
+          >
+            {{dDiscourseTags @topic mode="list" tagsForUser=@tagsForUser}}
+          </PluginOutlet>
+
+          {{#if this.participantGroups}}
+            <ParticipantGroups @groups={{this.participantGroups}} />
+          {{/if}}
+
+          <ActionList
+            class="likes"
+            @icon="heart"
+            @postNumbers={{@topic.liked_post_numbers}}
+            @topic={{@topic}}
+          />
+        </PluginOutlet>
+      </div>
+
+      {{#if @expandPinned}}
+        <TopicExcerpt @topic={{@topic}} />
+      {{/if}}
+
+      <PluginOutlet
+        @name="topic-list-main-link-bottom"
+        @outletArgs={{lazyHash topic=@topic expandPinned=@expandPinned}}
+      />
+    </td>
+  </template>
+}

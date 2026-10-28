@@ -1,0 +1,32 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+lv:
+  js:
+    explorer:
+      or: "vai"
+      ai:
+        generate: "Radīt"
+      help:
+        label: "Palīdzība"
+      schema:
+        filter: "Meklēt..."
+      types:
+        bool:
+          yes: "Jā"
+          no: "Nē"
+      delete: "Dzēst"
+      chart:
+        form:
+          bar: "Josla"
+      name: "Vārds"
+      query_groups: "Grupas"
+      query_tags: "Birkas"
+      query_description: "Apraksts"
+      reset_params: "Atlikt"
+    discourse_workflows:
+      sql:
+        param_value: "Vērtība"

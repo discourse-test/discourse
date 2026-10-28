@@ -1,0 +1,120 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import lazyHash from "discourse/helpers/lazy-hash";
+import { ajax } from "discourse/lib/ajax";
+import { popupAjaxError } from "discourse/lib/ajax-error";
+import { formatShortcut } from "discourse/lib/shortcut-format";
+import preventScrollOnFocus from "discourse/modifiers/prevent-scroll-on-focus";
+import DButton from "discourse/ui-kit/d-button";
+import dAutoFocus from "discourse/ui-kit/modifiers/d-auto-focus";
+import { i18n } from "discourse-i18n";
+
+export default class FastEdit extends Component {
+  @service capabilities;
+
+  @tracked isSaving = false;
+  @tracked value = this.args.newValue || this.args.initialValue;
+
+  shortcut = formatShortcut("mod+enter");
+
+  get buttonTitle() {
+    if (!this.capabilities.hasKeyboard) {
+      return;
+    }
+    return i18n("composer.submit_shortcut_title", {
+      shortcut: this.shortcut.label,
+    });
+  }
+
+  get disabled() {
+    return this.value === this.args.initialValue;
+  }
+
+  @action
+  onKeydown(event) {
+    if (
+      event.key === "Enter" &&
+      (event.ctrlKey || event.metaKey) &&
+      !this.disabled
+    ) {
+      this.save();
+    }
+  }
+
+  @action
+  updateValue(event) {
+    event.preventDefault();
+    this.value = event.target.value;
+  }
+
+  @action
+  updateValueProperty(value) {
+    this.value = value;
+  }
+
+  @action
+  async save() {
+    this.isSaving = true;
+
+    try {
+      const result = await ajax(`/posts/${this.args.post.id}`);
+      const newRaw = result.raw.replace(this.args.initialValue, this.value);
+
+      // Warn the user if we failed to update the post
+      if (newRaw === result.raw) {
+        throw new Error(
+          "Failed to update the post. Did your fast edit include a special character?"
+        );
+      }
+
+      await this.args.post.save({ raw: newRaw });
+    } catch (error) {
+      popupAjaxError(error);
+    } finally {
+      this.isSaving = false;
+      this.args.close();
+    }
+  }
+
+  <template>
+    {{! eslint-disable ember/template-no-invalid-interactive }}
+    <div class="fast-edit-container" {{on "keydown" this.onKeydown}}>
+      <textarea
+        id="fast-edit-input"
+        {{on "input" this.updateValue}}
+        {{preventScrollOnFocus}}
+        {{dAutoFocus}}
+      >{{this.value}}</textarea>
+
+      <div class="fast-edit-container__footer">
+        <DButton
+          aria-keyshortcuts={{if
+            this.capabilities.hasKeyboard
+            this.shortcut.aria
+          }}
+          class="btn-small btn-primary save-fast-edit"
+          @action={{this.save}}
+          @disabled={{this.disabled}}
+          @icon="pencil"
+          @isLoading={{this.isSaving}}
+          @label="composer.save_edit"
+          @translatedTitle={{this.buttonTitle}}
+        />
+
+        <PluginOutlet
+          @defaultGlimmer={{true}}
+          @name="fast-edit-footer-after"
+          @outletArgs={{lazyHash
+            initialValue=@initialValue
+            newValue=@newValue
+            updateValue=this.updateValueProperty
+          }}
+        />
+      </div>
+    </div>
+  </template>
+}

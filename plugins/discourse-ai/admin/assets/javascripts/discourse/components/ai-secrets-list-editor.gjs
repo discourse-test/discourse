@@ -1,0 +1,155 @@
+import Component from "@glimmer/component";
+import { LinkTo } from "@ember/routing";
+import { service } from "@ember/service";
+import AdminConfigAreaEmptyList from "discourse/admin/components/admin-config-area-empty-list";
+import DBreadcrumbsItem from "discourse/ui-kit/d-breadcrumbs-item";
+import DButton from "discourse/ui-kit/d-button";
+import DPageSubheader from "discourse/ui-kit/d-page-subheader";
+import { i18n } from "discourse-i18n";
+import AiSecretEditorForm from "discourse/plugins/discourse-ai/discourse/components/ai-secret-editor-form";
+
+export default class AiSecretsListEditor extends Component {
+  @service adminPluginNavManager;
+
+  get hasSecrets() {
+    return this.args.secrets.content?.length > 0;
+  }
+
+  <template>
+    <DBreadcrumbsItem
+      @label={{i18n "discourse_ai.secrets.short_title"}}
+      @path="/admin/plugins/{{this.adminPluginNavManager.currentPlugin.name}}/ai-secrets"
+    />
+    <section class="ai-secret-list-editor admin-detail">
+      {{#if @currentSecret}}
+        <AiSecretEditorForm @model={{@currentSecret}} @secrets={{@secrets}} />
+      {{else}}
+        <DPageSubheader
+          @descriptionLabel={{i18n "discourse_ai.secrets.description"}}
+          @titleLabel={{i18n "discourse_ai.secrets.short_title"}}
+        >
+          <:actions as |actions|>
+            <actions.Primary
+              class="ai-secret-list-editor__new-btn"
+              @icon="plus"
+              @label="discourse_ai.secrets.create_new"
+              @route="adminPlugins.show.discourse-ai-secrets.new"
+            />
+          </:actions>
+        </DPageSubheader>
+
+        {{#if this.hasSecrets}}
+          <table class="d-table ai-secret-list-editor__table">
+            <thead class="d-table__header">
+              <tr>
+                <th>{{i18n "discourse_ai.secrets.name"}}</th>
+                <th>{{i18n "discourse_ai.secrets.used_by"}}</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {{#each @secrets.content as |secret|}}
+                <tr
+                  class="ai-secret-list__row d-table__row"
+                  data-secret-id={{secret.id}}
+                >
+                  <td class="d-table__cell --overview">
+                    <strong>{{secret.name}}</strong>
+                  </td>
+                  <td class="d-table__cell --detail ai-secret-list__usage">
+                    <div class="d-table__mobile-label">
+                      {{i18n "discourse_ai.secrets.used_by"}}
+                    </div>
+                    {{#if secret.used_by}}
+                      {{#if secret.used_by.length}}
+                        {{#each secret.used_by as |usage|}}
+                          <div class="ai-secret-list__usage-item">
+                            {{#if (eq usage.type "embedding")}}
+                              <LinkTo
+                                @model={{usage.id}}
+                                @route="adminPlugins.show.discourse-ai-embeddings.edit"
+                              >
+                                {{usage.name}}
+                              </LinkTo>
+                              ({{i18n "discourse_ai.secrets.embedding"}})
+                            {{else if (eq usage.type "decision_model")}}
+                              <LinkTo
+                                @model={{usage.id}}
+                                @route="adminPlugins.show.discourse-ai-decision-models.edit"
+                              >
+                                {{usage.name}}
+                              </LinkTo>
+                              ({{i18n "discourse_ai.secrets.decision_model"}})
+                            {{else if (eq usage.type "mcp_server")}}
+                              <LinkTo
+                                @model={{usage.id}}
+                                @route="adminPlugins.show.discourse-ai-tools.mcp-server-edit"
+                              >
+                                {{usage.name}}
+                              </LinkTo>
+                              ({{i18n "discourse_ai.secrets.mcp_server"}})
+                            {{else if
+                              (eq usage.type "mcp_server_oauth_client_secret")
+                            }}
+                              <LinkTo
+                                @model={{usage.id}}
+                                @route="adminPlugins.show.discourse-ai-tools.mcp-server-edit"
+                              >
+                                {{usage.name}}
+                              </LinkTo>
+                              ({{i18n
+                                "discourse_ai.secrets.mcp_server_oauth_client_secret"
+                              }})
+                            {{else if (eq usage.type "tool")}}
+                              <LinkTo
+                                @model={{usage.id}}
+                                @route="adminPlugins.show.discourse-ai-tools.edit"
+                              >
+                                {{usage.name}}
+                              </LinkTo>
+                              ({{i18n "discourse_ai.secrets.tool"}})
+                            {{else}}
+                              <LinkTo
+                                @model={{usage.id}}
+                                @route="adminPlugins.show.discourse-ai-llms.edit"
+                              >
+                                {{usage.name}}
+                              </LinkTo>
+                            {{/if}}
+                          </div>
+                        {{/each}}
+                      {{else}}
+                        <span class="ai-secret-list__usage-none">
+                          {{i18n "discourse_ai.secrets.not_used"}}
+                        </span>
+                      {{/if}}
+                    {{else}}
+                      <span class="ai-secret-list__usage-none">
+                        {{i18n "discourse_ai.secrets.not_used"}}
+                      </span>
+                    {{/if}}
+                  </td>
+                  <td class="d-table__cell --controls">
+                    <DButton
+                      class="btn btn-default btn-small ai-secret-list__edit-button"
+                      @label="discourse_ai.secrets.edit"
+                      @route="adminPlugins.show.discourse-ai-secrets.edit"
+                      @routeModels={{secret.id}}
+                    />
+                  </td>
+                </tr>
+              {{/each}}
+            </tbody>
+          </table>
+        {{else}}
+          <AdminConfigAreaEmptyList
+            @ctaClass="ai-secret-list-editor__empty-new-btn"
+            @ctaLabel="discourse_ai.secrets.create_new"
+            @ctaRoute="adminPlugins.show.discourse-ai-secrets.new"
+            @emptyLabel="discourse_ai.secrets.no_secrets"
+          />
+        {{/if}}
+      {{/if}}
+    </section>
+  </template>
+}

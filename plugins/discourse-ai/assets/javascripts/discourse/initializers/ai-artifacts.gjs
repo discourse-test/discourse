@@ -1,0 +1,81 @@
+import { withPluginApi } from "discourse/lib/plugin-api";
+import AiArtifact from "../components/ai-artifact.gjs";
+
+function initializeAiArtifacts(api) {
+  api.decorateCookedElement(
+    (element, helper) => {
+      if (!helper.renderGlimmer) {
+        return;
+      }
+
+      [...element.querySelectorAll("div.ai-artifact")].forEach(
+        (artifactElement) => {
+          const shareKey = artifactElement.getAttribute(
+            "data-ai-artifact-share-key"
+          );
+
+          const artifactId = artifactElement.getAttribute(
+            "data-ai-artifact-id"
+          );
+
+          const artifactVersion = artifactElement.getAttribute(
+            "data-ai-artifact-version"
+          );
+
+          const artifactHeight = artifactElement.getAttribute(
+            "data-ai-artifact-height"
+          );
+
+          const autorun =
+            artifactElement.getAttribute("data-ai-artifact-autorun") ||
+            artifactElement.hasAttribute("data-ai-artifact-autorun");
+
+          const seamless =
+            artifactElement.getAttribute("data-ai-artifact-seamless") ||
+            artifactElement.hasAttribute("data-ai-artifact-seamless");
+
+          const dataAttributes = {};
+          for (const attr of artifactElement.attributes) {
+            if (
+              attr.name.startsWith("data-") &&
+              attr.name !== "data-ai-artifact-share-key" &&
+              attr.name !== "data-ai-artifact-id" &&
+              attr.name !== "data-ai-artifact-version" &&
+              attr.name !== "data-ai-artifact-height" &&
+              attr.name !== "data-ai-artifact-autorun" &&
+              attr.name !== "data-ai-artifact-seamless"
+            ) {
+              dataAttributes[attr.name] = attr.value;
+            }
+          }
+
+          helper.renderGlimmer(
+            artifactElement,
+            <template>
+              <AiArtifact
+                @artifactHeight={{artifactHeight}}
+                @artifactId={{artifactId}}
+                @artifactVersion={{artifactVersion}}
+                @autorun={{autorun}}
+                @dataAttributes={{dataAttributes}}
+                @seamless={{seamless}}
+                @shareKey={{shareKey}}
+              />
+            </template>
+          );
+        }
+      );
+    },
+    {
+      id: "ai-artifact",
+      onlyStream: true,
+    }
+  );
+}
+
+export default {
+  name: "ai-artifact",
+  initialize() {
+    withPluginApi(initializeAiArtifacts);
+  },
+};

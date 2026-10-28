@@ -1,0 +1,190 @@
+# frozen_string_literal: true
+
+RSpec.describe Jobs::PublishTopicToCategory do
+  fab!(:admin)
+  fab!(:category)
+  fab!(:another_category, :category)
+
+  let(:topic) do
+    topic = Fabricate(:topic, category: category)
+
+    Fabricate(
+      :topic_timer,
+      status_type: TopicTimer.types[:publish_to_category],
+      category_id: another_category.id,
+      user: admin,
+      topic: topic,
+      execute_at: 1.minute.ago,
+      created_at: 5.minutes.ago,
+    )
+
+    Fabricate(:post, topic: topic, user: topic.user)
+
+    topic
+  end
+
+  describe "when topic has been deleted" do
+    it "does not publish the topic to the new category" do
+      created_at = freeze_time 1.hour.ago
+      topic
+
+      freeze_time 1.hour.from_now
+      topic.trash!
+
+      described_class.new.execute(topic_timer_id: topic.public_topic_timer.id)
+
+      topic.reload
+      expect(topic.category).to eq(category)
+      expect(topic.created_at).to eq_time(created_at)
+    end
+  end
+
+  it "publishes the topic to the new category" do
+    freeze_time 1.hour.ago do
+      topic.update!(visible: false)
+    end
+
+    now = freeze_time
+
+    message =
+      MessageBus
+        .track_publish { described_class.new.execute(topic_timer_id: topic.public_topic_timer.id) }
+        .find { |m| Hash === m.data && m.data.key?(:reload_topic) && m.data.key?(:refresh_stream) }
+
+    topic.reload
+    expect(topic.category).to eq(another_category)
+    expect(topic.visible).to eq(true)
+    expect(topic.public_topic_timer).to eq(nil)
+    expect(message.channel).to eq("/topic/#{topic.id}")
+
+    %w[created_at bumped_at updated_at last_posted_at].each do |attribute|
+      expect(topic.public_send(attribute)).to eq_time(now)
+    end
+  end
+
+  it "keeps the publishing timer when the destination rejects a topic tag" do
+    user = Fabricate(:trust_level_4)
+
+    forbidden_tag = Fabricate(:tag)
+    allowed_tag = Fabricate(:tag)
+    allowed_tag_group = Fabricate(:tag_group, tags: [allowed_tag])
+    another_category.update!(tag_groups: [allowed_tag_group])
+
+    topic.update!(user: user, tags: [forbidden_tag], visible: false, created_at: 1.hour.ago)
+    timer = topic.public_topic_timer
+    timer.update!(user: user)
+    timestamp_attributes = %w[created_at bumped_at updated_at last_posted_at]
+    original_timestamps = topic.reload.attributes.slice(*timestamp_attributes)
+
+    expect { described_class.new.execute(topic_timer_id: timer.id) }.to raise_error(
+      ActiveRecord::RecordInvalid,
+    )
+
+    topic.reload
+    expect(topic.category).to eq(category)
+    expect(topic).not_to be_visible
+    expect(topic.attributes.slice(*timestamp_attributes)).to eq(original_timestamps)
+    expect(topic.public_topic_timer).to eq(timer)
+    expect(
+      UserHistory.exists?(
+        action: UserHistory.actions[:topic_published],
+        acting_user_id: user.id,
+        topic_id: topic.id,
+      ),
+    ).to eq(false)
+  end
+
+  it "publishes when the topic is already in the destination category" do
+    topic.update!(visible: false)
+    timer = topic.public_topic_timer
+    timer.update!(category_id: category.id)
+
+    described_class.new.execute(topic_timer_id: timer.id)
+
+    topic.reload
+    expect(topic.category).to eq(category)
+    expect(topic).to be_visible
+    expect(topic.public_topic_timer).to be_nil
+  end
+
+  describe "when topic is a private message" do
+    it "publishes the topic to the new category" do
+      freeze_time 1.hour.ago do
+        expect { topic.convert_to_private_message(Discourse.system_user) }.to change {
+          topic.private_message?
+        }.to(true)
+      end
+
+      now = freeze_time
+
+      messages =
+        MessageBus.track_publish do
+          described_class.new.execute(topic_timer_id: topic.public_topic_timer.id)
+        end
+
+      expect(messages.any? { |m| m.data[:reload_topic] && m.data[:refresh_stream] }).to eq(true)
+
+      topic.reload
+      expect(topic.category).to eq(another_category)
+      expect(topic.visible).to eq(true)
+      expect(topic.private_message?).to eq(false)
+      expect(
+        UserHistory.exists?(
+          action: UserHistory.actions[:topic_published],
+          acting_user_id: admin.id,
+          topic_id: topic.id,
+        ),
+      ).to eq(true)
+
+      %w[created_at bumped_at updated_at last_posted_at].each do |attribute|
+        expect(topic.public_send(attribute)).to eq_time(now)
+      end
+    end
+
+    it "does nothing if the user can't see the PM" do
+      non_participant_TL4_user = Fabricate(:trust_level_4)
+      topic.convert_to_private_message(Discourse.system_user)
+      timer = topic.public_topic_timer
+      timer.update!(user: non_participant_TL4_user)
+
+      described_class.new.execute(topic_timer_id: topic.public_topic_timer.id)
+
+      topic.reload
+      expect(topic.private_message?).to eq(true)
+      expect(topic.category).not_to eq(another_category)
+    end
+
+    it "does nothing if the user can't convert the PM" do
+      tl4_user = Fabricate(:trust_level_4)
+      topic.convert_to_private_message(Discourse.system_user)
+
+      topic.allowed_users << tl4_user
+
+      timer = topic.public_topic_timer
+      timer.update!(user: tl4_user)
+
+      described_class.new.execute(topic_timer_id: topic.public_topic_timer.id)
+
+      topic.reload
+      expect(topic.private_message?).to eq(true)
+      expect(topic.category).not_to eq(another_category)
+    end
+  end
+
+  describe "when new category has a default auto-close" do
+    it "applies the auto-close timer when publishing" do
+      freeze_time
+
+      another_category.update!(auto_close_hours: 5)
+      topic
+
+      described_class.new.execute(topic_timer_id: topic.public_topic_timer.id)
+
+      topic.reload
+      topic_timer = topic.public_topic_timer
+      expect(topic.category).to eq(another_category)
+      expect(topic_timer.status_type).to eq(TopicTimer.types[:close])
+      expect(topic_timer.execute_at).to be_within_one_second_of(5.hours.from_now)
+    end
+  end
+end

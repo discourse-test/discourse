@@ -1,0 +1,26 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+hy:
+  js:
+    discourse_rewind:
+      share:
+        toggle_label:
+          private: "Մասնավոր"
+          public: "Հանրային"
+      reports:
+        reading_time:
+          title: Կարդալու ժամանակը
+        chat_usage:
+          author: Դուք
+          author_others: "%{username}"
+          status_online: "● օնլայն"
+        live_usage:
+          minutes:
+            one: "%{count} րոպե"
+            other: "%{count} րոպե"
+        writing_analysis:
+          menu_other: Այլ

@@ -1,0 +1,811 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { Input } from "@ember/component";
+import { fn, hash } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import didInsert from "@ember/render-modifiers/modifiers/did-insert";
+import { cancel } from "@ember/runloop";
+import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
+import { modifier } from "ember-modifier";
+import ComposerActionTitle from "discourse/components/composer-action-title";
+import ComposerBody from "discourse/components/composer-body";
+import ComposerEditor from "discourse/components/composer-editor";
+import ComposerFullscreenPrompt from "discourse/components/composer-fullscreen-prompt";
+import ComposerMessages from "discourse/components/composer-messages";
+import ComposerSaveButton from "discourse/components/composer-save-button";
+import ComposerTitle from "discourse/components/composer-title";
+import ComposerToggles from "discourse/components/composer-toggles";
+import ComposerUserSelector from "discourse/components/composer-user-selector";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import htmlClass from "discourse/helpers/html-class";
+import lazyHash from "discourse/helpers/lazy-hash";
+import discourseDebounce from "discourse/lib/debounce";
+import { bind } from "discourse/lib/decorators";
+import {
+  dampenedOverdrag,
+  shouldDeferSwipeToContent,
+  SWIPE_DISTANCE_THRESHOLD,
+  SWIPE_VELOCITY_THRESHOLD,
+} from "discourse/lib/swipe-events";
+import PostLocalization from "discourse/models/post-localization";
+import CategoryChooser from "discourse/select-kit/components/category-chooser";
+import DropdownSelectBox from "discourse/select-kit/components/dropdown-select-box";
+import MiniTagChooser from "discourse/select-kit/components/mini-tag-chooser";
+import DButton from "discourse/ui-kit/d-button";
+import DPopupInputTip from "discourse/ui-kit/d-popup-input-tip";
+import DResizeSeparator from "discourse/ui-kit/d-resize-separator";
+import dAvatar from "discourse/ui-kit/helpers/d-avatar";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import dLoadingSpinner from "discourse/ui-kit/helpers/d-loading-spinner";
+import dSwipe from "discourse/ui-kit/modifiers/d-swipe";
+import { i18n } from "discourse-i18n";
+
+const trackFieldsHeight = modifier((element, [enabled]) => {
+  if (!enabled) {
+    return;
+  }
+
+  const target = document.getElementById("reply-control");
+  if (!target) {
+    return;
+  }
+
+  const update = (height) => {
+    const rounded = Math.round(height);
+    target.style.setProperty("--composer-fields-height", `${rounded}px`);
+    target.classList.toggle("has-composer-fields", rounded > 0);
+  };
+
+  update(element.offsetHeight);
+
+  const observer = new ResizeObserver(([entry]) => {
+    update(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+  });
+  observer.observe(element);
+
+  return () => {
+    observer.disconnect();
+    target.style.removeProperty("--composer-fields-height");
+    target.classList.remove("has-composer-fields");
+  };
+});
+
+const PmUserSelector = <template>
+  <div class="user-selector">
+    <ComposerUserSelector
+      class={{dConcatClass "users-input" (if @showWarning "can-warn")}}
+      @focusTarget={{@focusTarget}}
+      @hasGroups={{@model.hasTargetGroups}}
+      @recipients={{@model.targetRecipients}}
+      @topicId={{@topicId}}
+    />
+    {{#if @showWarning}}
+      <label class="add-warning">
+        <Input @checked={{@model.isWarning}} @type="checkbox" />
+        <span>{{i18n "composer.add_warning"}}</span>
+      </label>
+    {{/if}}
+  </div>
+</template>;
+
+export default class ComposerContainer extends Component {
+  @service composer;
+  @service languageNameLookup;
+  @service site;
+  @service siteSettings;
+  @service appEvents;
+  @service keyValueStore;
+
+  @tracked toolbarPortalTarget;
+
+  #swipeEditor = null;
+  #swipeSlide = 0;
+
+  willDestroy() {
+    super.willDestroy(...arguments);
+    cancel(this.composerResizeDebounceHandler);
+  }
+
+  get composerRedesign() {
+    return this.siteSettings.enable_composer_redesign;
+  }
+
+  get availableContentLocalizationLocales() {
+    const originalPostLocale = this.composer.model?.post?.locale;
+
+    return this.siteSettings.available_content_localization_locales
+      .filter(({ value }) => value !== originalPostLocale)
+      .map(({ value }) => ({
+        name: this.languageNameLookup.getLanguageName(value),
+        value,
+      }));
+  }
+
+  @action
+  onSwipeStart(state, event) {
+    // :focus-within keeps the match when a NodeView input inside the editor
+    // is focused (which doesn't set .in-focus)
+    const editor = state.element.querySelector(
+      ".d-editor-textarea-wrapper.in-focus, .d-editor-textarea-wrapper:focus-within"
+    );
+
+    if (
+      !editor ||
+      !state.goingDown() ||
+      shouldDeferSwipeToContent(state, state.element)
+    ) {
+      event.preventDefault();
+      return;
+    }
+
+    this.#swipeEditor = editor;
+    this.#swipeSlide = -parseFloat(getComputedStyle(editor).marginTop) || 0;
+    editor.style.transition = "none";
+  }
+
+  @action
+  onSwipe(state) {
+    if (!this.#swipeEditor) {
+      return;
+    }
+
+    const pulled = Math.max(0, state.deltaY);
+    const margin =
+      pulled <= this.#swipeSlide
+        ? pulled - this.#swipeSlide
+        : dampenedOverdrag(pulled - this.#swipeSlide);
+    this.#swipeEditor.style.marginTop = `${margin}px`;
+  }
+
+  @action
+  onSwipeEnd(state) {
+    const editor = this.#swipeEditor;
+    if (!editor) {
+      return;
+    }
+    this.#swipeEditor = null;
+    editor.style.transition = "";
+
+    const dismissed =
+      state.deltaY > SWIPE_DISTANCE_THRESHOLD ||
+      state.velocityY > SWIPE_VELOCITY_THRESHOLD;
+
+    if (dismissed && editor.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+
+    editor.style.marginTop = "";
+  }
+
+  @action
+  onSwipeCancel() {
+    const editor = this.#swipeEditor;
+    if (!editor) {
+      return;
+    }
+    this.#swipeEditor = null;
+    editor.style.transition = "";
+    editor.style.marginTop = "";
+  }
+
+  @action
+  setToolbarPortalTarget(element) {
+    this.toolbarPortalTarget = element;
+  }
+
+  @action
+  async updateSelectedTranslationLocale(locale) {
+    const { model } = this.composer;
+    const replyBefore = model.reply;
+    const titleBefore = model.title;
+    this.composer.selectedTranslationLocale = locale;
+
+    let localization;
+    try {
+      const { post_localizations } = await PostLocalization.find(model.post.id);
+      localization = post_localizations.find((l) => l.locale === locale);
+    } catch {}
+
+    // Bail if the user picked a different locale or typed during the fetch.
+    if (
+      this.composer.selectedTranslationLocale !== locale ||
+      model.reply !== replyBefore ||
+      model.title !== titleBefore
+    ) {
+      return;
+    }
+
+    if (localization) {
+      model.setProperties({
+        reply: localization.raw,
+        originalText: localization.raw,
+      });
+
+      if (localization.topic_localization) {
+        model.setProperties({
+          title: localization.topic_localization.title,
+          originalTitle: localization.topic_localization.title,
+        });
+      }
+    } else {
+      model.setProperties({
+        reply: "",
+        title: "",
+        originalText: "",
+        originalTitle: "",
+      });
+    }
+  }
+
+  /** The box being resized. A function, because the separator resolves it. */
+  @bind
+  replyControl() {
+    return document.getElementById("reply-control");
+  }
+
+  @bind
+  onResizeStart() {
+    this.appEvents.trigger("composer:resize-started");
+  }
+
+  @bind
+  onResizeDrag(size) {
+    this.appEvents.trigger("composer:div-resizing");
+
+    this.replyControl()?.classList.add("clear-transitions");
+
+    const height = `${size}px`;
+    // resuming from minimized restores the height from the model
+    this.composer.model?.set("composerHeight", height);
+    document.documentElement.style.setProperty(
+      "--composer-height",
+      size ? height : ""
+    );
+
+    this._triggerComposerResized();
+  }
+
+  @bind
+  onResizeEnd(size) {
+    this.replyControl()?.classList.remove("clear-transitions");
+    // Announced before persisting, because the write can throw — storage quota —
+    // and a subscriber that undoes its own drag-time state has to hear the end of
+    // every resize regardless.
+    this.appEvents.trigger("composer:resize-ended");
+    // Persisted once per resize rather than on every report: the size is now
+    // reported once per animation frame instead of on a fixed throttle, and this
+    // write is the only thing that cared about the cadence.
+    this.keyValueStore.set({ key: "composerHeight", value: `${size}px` });
+  }
+
+  composerResized() {
+    this.appEvents.trigger("composer:resized");
+  }
+
+  _triggerComposerResized() {
+    this.composerResizeDebounceHandler = discourseDebounce(
+      this,
+      this.composerResized,
+      300
+    );
+  }
+
+  <template>
+    <ComposerBody
+      @cancelled={{this.composer.cancelled}}
+      @composer={{this.composer.model}}
+      @openIfDraft={{this.composer.openIfDraft}}
+      @save={{this.composer.saveAction}}
+      @showPreview={{this.composer.isPreviewVisible}}
+      @typed={{this.composer.typed}}
+    >
+      <DResizeSeparator
+        class="grippie"
+        @axis="vertical"
+        @label={{i18n "composer.resize"}}
+        @measure={{this.replyControl}}
+        @onResize={{this.onResizeDrag}}
+        @onResizeEnd={{this.onResizeEnd}}
+        @onResizeStart={{this.onResizeStart}}
+        @side="end"
+      />
+      {{#if this.composer.visible}}
+        {{htmlClass (if this.composer.isPreviewVisible "composer-has-preview")}}
+
+        {{#unless this.site.mobileView}}
+          <ComposerMessages
+            @addLinkLookup={{this.composer.addLinkLookup}}
+            @composer={{this.composer.model}}
+            @messageCount={{this.composer.messageCount}}
+          />
+        {{/unless}}
+
+        {{#if this.composer.showFullScreenPrompt}}
+          <ComposerFullscreenPrompt
+            @removeFullScreenExitPrompt={{this.composer.removeFullScreenExitPrompt}}
+          />
+        {{/if}}
+
+        {{#if this.composer.model.viewOpenOrFullscreen}}
+          <div
+            aria-label={{this.composer.ariaLabel}}
+            class="reply-area
+              {{if this.composer.canEditTags 'with-tags' 'without-tags'}}
+              {{if
+                this.composer.hasFormTemplate
+                'with-form-template'
+                'without-form-template'
+              }}
+              {{if
+                this.composer.model.showCategoryChooser
+                'with-category'
+                'without-category'
+              }}"
+            role="dialog"
+            {{dSwipe
+              onDidStartSwipe=this.onSwipeStart
+              onDidSwipe=this.onSwipe
+              onDidEndSwipe=this.onSwipeEnd
+              onDidCancelSwipe=this.onSwipeCancel
+              enabled=(if this.composerRedesign true false)
+              lockBody=false
+            }}
+          >
+            <span class="composer-open-plugin-outlet-container">
+              <PluginOutlet
+                @connectorTagName="div"
+                @name="composer-open"
+                @outletArgs={{lazyHash model=this.composer.model}}
+              />
+            </span>
+
+            <div class="reply-to">
+              {{#unless this.composer.model.viewFullscreen}}
+                <ComposerActionTitle @model={{this.composer.model}} />
+
+                {{#if this.composer.showTranslationSelector}}
+                  <DropdownSelectBox
+                    class="translation-selector-dropdown btn-small"
+                    @content={{this.availableContentLocalizationLocales}}
+                    @nameProperty="name"
+                    @onChange={{this.updateSelectedTranslationLocale}}
+                    @options={{hash
+                      icon="language"
+                      showCaret=true
+                      filterable=true
+                      disabled=this.composer.loading
+                      placement="bottom-start"
+                      translatedNone=(i18n "composer.translations.select")
+                    }}
+                    @value={{this.composer.selectedTranslationLocale}}
+                    @valueProperty="value"
+                  />
+                {{/if}}
+
+                <PluginOutlet
+                  @name="composer-action-after"
+                  @outletArgs={{lazyHash model=this.composer.model}}
+                />
+              {{/unless}}
+
+              <PluginOutlet
+                @name="before-composer-controls"
+                @outletArgs={{lazyHash model=this.composer.model}}
+              />
+
+              <ComposerToggles
+                @composeState={{this.composer.model.composeState}}
+                @disableTextarea={{this.composer.disableTextarea}}
+                @saveAndClose={{this.composer.saveAndClose}}
+                @showToolbar={{this.composer.showToolbar}}
+                @toggleComposer={{this.composer.toggle}}
+                @toggleFullscreen={{this.composer.fullscreenComposer}}
+                @toggleToolbar={{this.composer.toggleToolbar}}
+              />
+            </div>
+
+            <ComposerEditor @toolbarPortalTarget={{this.toolbarPortalTarget}}>
+              <div
+                class="composer-fields"
+                {{trackFieldsHeight this.composerRedesign}}
+              >
+                <PluginOutlet
+                  @name="before-composer-fields"
+                  @outletArgs={{lazyHash model=this.composer.model}}
+                />
+                {{#unless this.composer.model.viewFullscreen}}
+                  {{#if this.composer.model.canEditTitle}}
+                    {{#unless this.composerRedesign}}
+                      {{#if this.composer.model.creatingPrivateMessage}}
+                        <PmUserSelector
+                          @focusTarget={{this.composer.focusTarget}}
+                          @model={{this.composer.model}}
+                          @showWarning={{this.composer.showWarning}}
+                          @topicId={{this.composer.topicModel.id}}
+                        />
+                      {{/if}}
+                    {{/unless}}
+
+                    <div
+                      class="title-and-category
+                        {{if this.composer.isPreviewVisible 'with-preview'}}"
+                    >
+                      {{#if this.composerRedesign}}
+                        {{#if this.composer.model.creatingPrivateMessage}}
+                          <PmUserSelector
+                            @focusTarget={{this.composer.focusTarget}}
+                            @model={{this.composer.model}}
+                            @showWarning={{this.composer.showWarning}}
+                            @topicId={{this.composer.topicModel.id}}
+                          />
+                        {{/if}}
+                      {{/if}}
+
+                      {{#unless this.composerRedesign}}
+                        <ComposerTitle
+                          @composer={{this.composer.model}}
+                          @focusTarget={{this.composer.focusTarget}}
+                          @lastValidatedAt={{this.composer.lastValidatedAt}}
+                        />
+                      {{/unless}}
+
+                      {{#if this.composer.model.showCategoryChooser}}
+                        <div class="category-input">
+                          <CategoryChooser
+                            @onChange={{this.composer.updateCategory}}
+                            @options={{hash
+                              disabled=this.composer.disableCategoryChooser
+                              scopedCategoryId=this.composer.scopedCategoryId
+                              prioritizedCategoryId=this.composer.prioritizedCategoryId
+                              readOnlyCategoryId=this.composer.readOnlyCategoryId
+                            }}
+                            @value={{this.composer.model.categoryId}}
+                          />
+                          <PluginOutlet
+                            @name="after-composer-category-input"
+                            @outletArgs={{lazyHash
+                              composer=this.composer.model
+                            }}
+                          />
+                          <DPopupInputTip
+                            @validation={{this.composer.categoryValidation}}
+                          />
+                        </div>
+                      {{/if}}
+
+                      {{#if this.composer.canEditTags}}
+                        <div class="tags-input">
+                          <MiniTagChooser
+                            @onChange={{fn (mut this.composer.model.tags)}}
+                            @options={{hash
+                              disabled=this.composer.disableTagsChooser
+                              categoryId=this.composer.model.categoryId
+                              minimum=this.composer.model.minimumRequiredTags
+                              icon=(if this.composerRedesign "tag")
+                              prioritizeRecentTags=true
+                              useHeaderSelectedCount=(if
+                                this.composerRedesign true
+                              )
+                            }}
+                            @value={{this.composer.model.tags}}
+                          />
+                          <PluginOutlet
+                            @name="after-composer-tag-input"
+                            @outletArgs={{lazyHash
+                              composer=this.composer.model
+                            }}
+                          />
+                          <DPopupInputTip
+                            @validation={{this.composer.tagValidation}}
+                          />
+                        </div>
+                      {{/if}}
+
+                      <PluginOutlet
+                        @name="after-title-and-category"
+                        @outletArgs={{lazyHash
+                          model=this.composer.model
+                          tagValidation=this.composer.tagValidation
+                          canEditTags=this.composer.canEditTags
+                          disabled=this.composer.disableTagsChooser
+                        }}
+                      />
+                    </div>
+                  {{/if}}
+
+                  <span>
+                    <PluginOutlet
+                      @connectorTagName="div"
+                      @name="composer-fields"
+                      @outletArgs={{lazyHash
+                        model=this.composer.model
+                        showPreview=this.composer.isPreviewVisible
+                      }}
+                    />
+                  </span>
+
+                  {{#if this.composerRedesign}}
+                    {{#if this.composer.model.canEditTitle}}
+                      <ComposerTitle
+                        @composer={{this.composer.model}}
+                        @focusTarget={{this.composer.focusTarget}}
+                        @lastValidatedAt={{this.composer.lastValidatedAt}}
+                      />
+                    {{/if}}
+                  {{/if}}
+                {{/unless}}
+              </div>
+            </ComposerEditor>
+
+            <span>
+              <PluginOutlet
+                @name="composer-after-composer-editor"
+                @outletArgs={{lazyHash model=this.composer.model}}
+              />
+            </span>
+
+            {{#if this.composerRedesign}}
+              <div class="composer-footer">
+                <div
+                  class="composer-footer__toolbar"
+                  {{didInsert this.setToolbarPortalTarget}}
+                ></div>
+
+                <div class="submit-panel">
+                  <span>
+                    <PluginOutlet
+                      @connectorTagName="div"
+                      @name="composer-fields-below"
+                      @outletArgs={{lazyHash model=this.composer.model}}
+                    />
+                  </span>
+
+                  {{#if this.site.mobileView}}
+                    {{#if this.composer.model.noBump}}
+                      <span class="no-bump">{{dIcon "anchor"}}</span>
+                    {{/if}}
+                  {{/if}}
+
+                  {{#if this.composer.model.draftStatus}}
+                    <div
+                      class={{if this.composer.isUploading "hidden"}}
+                      id="draft-status"
+                    >
+                      <span
+                        class="draft-error"
+                        title={{this.composer.model.draftStatus}}
+                      >
+                        {{#if this.composer.model.draftConflictUser}}
+                          {{dAvatar
+                            this.composer.model.draftConflictUser
+                            imageSize="small"
+                          }}
+                          {{dIcon "user-pen"}}
+                        {{else}}
+                          {{dIcon "triangle-exclamation"}}
+                        {{/if}}
+                        {{#if this.site.desktopView}}
+                          {{this.composer.model.draftStatus}}
+                        {{/if}}
+                      </span>
+                    </div>
+                  {{/if}}
+
+                  {{#if
+                    (or
+                      this.composer.isUploading this.composer.isProcessingUpload
+                    )
+                  }}
+                    <div id="file-uploading">
+                      {{#if this.composer.isProcessingUpload}}
+                        {{dLoadingSpinner size="small"}}<span>{{i18n
+                            "upload_selector.processing"
+                          }}</span>
+                      {{else}}
+                        {{dLoadingSpinner size="small"}}<span>{{i18n
+                            "upload_selector.uploading"
+                          }}
+                          {{this.composer.uploadProgress}}%</span>
+                      {{/if}}
+
+                      {{#if this.composer.isCancellable}}
+                        <a
+                          href
+                          id="cancel-file-upload"
+                          {{on "click" this.composer.cancelUpload}}
+                        >{{dIcon "xmark"}}</a>
+                      {{/if}}
+                    </div>
+                  {{/if}}
+
+                  <div class="save-or-cancel">
+
+                    <DButton
+                      class="discard-button btn-transparent"
+                      @action={{this.composer.cancel}}
+                      @label={{this.composer.cancelLabel}}
+                      @title={{this.composer.cancelLabel}}
+                    />
+
+                    <ComposerSaveButton
+                      @action={{this.composer.saveAction}}
+                      @disableSubmit={{this.composer.disableSubmit}}
+                      @forwardEvent={{true}}
+                      @label={{this.composer.saveLabel}}
+                    />
+
+                    <PluginOutlet
+                      @name="composer-after-save-or-cancel"
+                      @outletArgs={{lazyHash model=this.composer.model}}
+                    />
+
+                  </div>
+
+                  {{#if this.site.mobileView}}
+                    <span>
+                      <PluginOutlet
+                        @name="composer-mobile-buttons-bottom"
+                        @outletArgs={{lazyHash model=this.composer.model}}
+                      />
+                    </span>
+                  {{/if}}
+                </div>
+              </div>
+            {{else}}
+              <div class="submit-panel">
+                <span>
+                  <PluginOutlet
+                    @connectorTagName="div"
+                    @name="composer-fields-below"
+                    @outletArgs={{lazyHash model=this.composer.model}}
+                  />
+                </span>
+
+                <div class="save-or-cancel">
+                  <ComposerSaveButton
+                    @action={{this.composer.saveAction}}
+                    @disableSubmit={{this.composer.disableSubmit}}
+                    @forwardEvent={{true}}
+                    @icon={{this.composer.saveIcon}}
+                    @label={{this.composer.saveLabel}}
+                  />
+
+                  {{#unless this.site.mobileView}}
+                    <DButton
+                      class="discard-button btn-transparent"
+                      @action={{this.composer.cancel}}
+                      @label={{this.composer.cancelLabel}}
+                      @title={{this.composer.cancelLabel}}
+                    />
+                  {{/unless}}
+
+                  {{#if this.site.mobileView}}
+                    <DButton
+                      class="discard-button btn-transparent"
+                      @action={{this.composer.cancel}}
+                      @icon={{this.composer.cancelIcon}}
+                      @title={{this.composer.cancelLabel}}
+                    />
+                  {{/if}}
+
+                  <span>
+                    <PluginOutlet
+                      @name="composer-after-save-or-cancel"
+                      @outletArgs={{lazyHash model=this.composer.model}}
+                    />
+                  </span>
+                </div>
+
+                {{#if this.site.mobileView}}
+                  <span>
+                    <PluginOutlet
+                      @name="composer-mobile-buttons-bottom"
+                      @outletArgs={{lazyHash model=this.composer.model}}
+                    />
+                  </span>
+
+                  {{#if this.composer.allowUpload}}
+                    <a
+                      aria-label={{i18n "composer.upload_title"}}
+                      class="btn btn-default no-text mobile-file-upload
+                        {{if this.composer.isUploading 'hidden'}}"
+                      id="mobile-file-upload"
+                    >
+                      {{dIcon this.composer.uploadIcon}}
+                    </a>
+                  {{/if}}
+                {{/if}}
+
+                {{#if
+                  (or
+                    this.composer.isUploading this.composer.isProcessingUpload
+                  )
+                }}
+                  <div id="file-uploading">
+                    {{#if this.composer.isProcessingUpload}}
+                      {{dLoadingSpinner size="small"}}<span>{{i18n
+                          "upload_selector.processing"
+                        }}</span>
+                    {{else}}
+                      {{dLoadingSpinner size="small"}}<span>{{i18n
+                          "upload_selector.uploading"
+                        }}
+                        {{this.composer.uploadProgress}}%</span>
+                    {{/if}}
+
+                    {{#if this.composer.isCancellable}}
+                      <a
+                        href
+                        id="cancel-file-upload"
+                        {{on "click" this.composer.cancelUpload}}
+                      >{{dIcon "xmark"}}</a>
+                    {{/if}}
+                  </div>
+                {{/if}}
+
+                {{#if this.composer.model.draftStatus}}
+                  <div
+                    class={{if this.composer.isUploading "hidden"}}
+                    id="draft-status"
+                  >
+                    <span
+                      class="draft-error"
+                      title={{this.composer.model.draftStatus}}
+                    >
+                      {{#if this.composer.model.draftConflictUser}}
+                        {{dAvatar
+                          this.composer.model.draftConflictUser
+                          imageSize="small"
+                        }}
+                        {{dIcon "user-pen"}}
+                      {{else}}
+                        {{dIcon "triangle-exclamation"}}
+                      {{/if}}
+                      {{#if this.site.desktopView}}
+                        {{this.composer.model.draftStatus}}
+                      {{/if}}
+                    </span>
+                  </div>
+                {{/if}}
+              </div>
+            {{/if}}
+          </div>
+        {{else}}
+          <div class="saving-text">
+            {{#if this.composer.model.createdPost}}
+              {{i18n "composer.saved"}}
+              <a
+                class="permalink"
+                href={{this.composer.createdPost.url}}
+                {{on "click" this.composer.viewNewReply}}
+              >{{i18n "composer.view_new_post"}}</a>
+            {{else}}
+              {{i18n "composer.saving"}}
+              {{dLoadingSpinner size="small"}}
+            {{/if}}
+          </div>
+
+          <div class="draft-text">
+            {{#if this.composer.model.topic}}
+              {{dIcon "share"}}
+              {{trustHTML this.composer.draftTitle}}
+            {{else}}
+              {{i18n "composer.saved_draft"}}
+            {{/if}}
+          </div>
+
+          <ComposerToggles
+            @composeState={{this.composer.model.composeState}}
+            @saveAndClose={{this.composer.saveAndClose}}
+            @toggleComposer={{this.composer.toggle}}
+            @toggleFullscreen={{this.composer.openIfDraft}}
+            @toggleToolbar={{this.composer.toggleToolbar}}
+          />
+        {{/if}}
+      {{/if}}
+    </ComposerBody>
+  </template>
+}

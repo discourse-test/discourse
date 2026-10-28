@@ -1,0 +1,69 @@
+# frozen_string_literal: true
+
+# name: discourse-rewind
+# about: A fun end-of-year summary for members' activity in the community.
+# meta_topic_id: 390847
+# version: 2025.12.0
+# authors: Discourse
+# url: https://github.com/discourse/discourse/tree/main/plugins/discourse-rewind
+# required_version: 2.7.0
+
+enabled_site_setting :discourse_rewind_enabled
+
+register_svg_icon "repeat"
+register_svg_icon "volume-high"
+register_svg_icon "volume-xmark"
+
+register_asset "stylesheets/common/_index.scss"
+register_asset "stylesheets/mobile/_index.scss", :mobile
+
+module ::DiscourseRewind
+  PLUGIN_NAME = "discourse-rewind"
+
+  def self.rewind_year(date = nil)
+    date ||= Time.zone.now
+    date.month == 1 ? date.year - 1 : date.year
+  end
+
+  def self.rewind_period?
+    Rails.env.development? || Time.zone.now.month.in?([1, 12])
+  end
+end
+
+require_relative "lib/discourse_rewind/engine"
+
+after_initialize do
+  UserUpdater::OPTION_ATTR.push(:discourse_rewind_enabled, :discourse_rewind_share_publicly)
+
+  # TODO: Remove once 20260105171115_rename_discourse_rewind_disabled_to_enabled has been promoted to pre-deploy
+  UserOption.ignored_columns += %i[discourse_rewind_disabled]
+
+  add_to_class(:user, :discourse_rewind_and_profile_public?) do
+    user_option.discourse_rewind_share_publicly && !user_option.hide_profile
+  end
+
+  %i[user_option current_user_option].each do |serializer|
+    add_to_serializer(serializer, :discourse_rewind_enabled) { object.discourse_rewind_enabled }
+
+    add_to_serializer(serializer, :discourse_rewind_dismissed) do
+      dismissed_at = object.discourse_rewind_dismissed_at
+      dismissed_at.present? &&
+        DiscourseRewind.rewind_year(dismissed_at) >= DiscourseRewind.rewind_year
+    end
+
+    add_to_serializer(serializer, :discourse_rewind_share_publicly) do
+      scope.user.discourse_rewind_and_profile_public?
+    end
+  end
+
+  add_to_serializer(:current_user, :is_rewind_active) do
+    DiscourseRewind.rewind_period? && scope.user.created_at <= 1.month.ago
+  end
+
+  Discourse::Application.routes.append do
+    get "u/:username/preferences/rewind" => "users#preferences",
+        :constraints => {
+          username: RouteFormat.username,
+        }
+  end
+end

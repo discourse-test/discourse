@@ -1,0 +1,24 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+ko:
+  js:
+    discourse_rewind:
+      share:
+        toggle_label:
+          private: "비공개"
+          public: "공개"
+      reports:
+        reading_time:
+          title: 읽은 시간
+        chat_usage:
+          author: 사용자님
+          author_others: "%{username}"
+        live_usage:
+          minutes:
+            other: "%{count}분"
+        writing_analysis:
+          menu_other: 기타

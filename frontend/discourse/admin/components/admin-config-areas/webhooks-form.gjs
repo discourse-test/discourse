@@ -1,0 +1,307 @@
+import Component from "@glimmer/component";
+import { cached, tracked } from "@glimmer/tracking";
+import { concat } from "@ember/helper";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import WebhookEventChooser from "discourse/admin/components/webhook-event-chooser";
+import BackButton from "discourse/components/back-button";
+import Form from "discourse/components/form";
+import GroupSelector from "discourse/components/group-selector";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import lazyHash from "discourse/helpers/lazy-hash";
+import { popupAjaxError } from "discourse/lib/ajax-error";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
+import CategorySelector from "discourse/select-kit/components/category-selector";
+import DConditionalLoadingSection from "discourse/ui-kit/d-conditional-loading-section";
+import { i18n } from "discourse-i18n";
+
+export default class AdminConfigAreasWebhookForm extends Component {
+  @service router;
+  @service siteSettings;
+  @service store;
+
+  @tracked loadingExtras = true;
+  @tracked defaultEventTypes = {};
+  @tracked groupedEventTypes = {};
+  @tracked contentTypes = [];
+  @tracked deliveryStatuses = [];
+  @autoTrackedArray webhookEventTypes = [];
+
+  constructor() {
+    super(...arguments);
+
+    this.#loadExtras();
+  }
+
+  get webhook() {
+    return this.args.webhook;
+  }
+
+  @cached
+  get formData() {
+    return {
+      payload_url: this.webhook.payload_url,
+      content_type: this.webhook.content_type,
+      secret: this.webhook.secret,
+      categories: this.webhook.categories,
+      group_names: this.webhook.group_names,
+      tags: this.webhook.tags,
+      wildcard: this.webhook.wildcard,
+      web_hook_event_types: this.webhook.web_hook_event_types,
+      verify_certificate: this.webhook.verify_certificate,
+      active: this.webhook.active,
+    };
+  }
+
+  get showTagsFilter() {
+    return this.siteSettings.tagging_enabled;
+  }
+
+  get saveButtonLabel() {
+    return this.webhook.isNew
+      ? "admin.web_hooks.create"
+      : "admin.web_hooks.save";
+  }
+
+  @action
+  async save(data) {
+    try {
+      const isNew = this.webhook.isNew;
+
+      this.webhook.setProperties({
+        ...data,
+        web_hook_event_types: this.webhookEventTypes,
+      });
+
+      await this.webhook.save();
+
+      if (isNew) {
+        this.router.transitionTo("adminWebHooks.show", this.webhook);
+      } else {
+        this.router.transitionTo("adminWebHooks.index");
+      }
+    } catch (e) {
+      popupAjaxError(e);
+    }
+  }
+
+  async #loadExtras() {
+    try {
+      this.loadingExtras = true;
+
+      const webhooks = await this.store.findAll("web-hook");
+
+      this.groupedEventTypes = webhooks.extras.grouped_event_types;
+      this.defaultEventTypes = webhooks.extras.default_event_types;
+      this.contentTypes = webhooks.extras.content_types;
+      this.deliveryStatuses = webhooks.extras.delivery_statuses;
+
+      if (this.webhook.isNew) {
+        this.webhookEventTypes = [...this.defaultEventTypes];
+      } else {
+        this.webhookEventTypes = [...this.webhook.web_hook_event_types];
+      }
+    } finally {
+      this.loadingExtras = false;
+    }
+  }
+
+  <template>
+    <BackButton @label="admin.web_hooks.back" @route="adminWebHooks.index" />
+
+    <div class="admin-config-area user-field">
+      <div class="admin-config-area__primary-content">
+        <div class="admin-config-area-card">
+          <div class="web-hook-container">
+            <DConditionalLoadingSection @isLoading={{this.loadingExtras}}>
+              <p>{{i18n "admin.web_hooks.detailed_instruction"}}</p>
+              <Form
+                @data={{this.formData}}
+                @onSubmit={{this.save}}
+                as |form transientData|
+              >
+                <form.Field
+                  @format="large"
+                  @name="payload_url"
+                  @title={{i18n "admin.web_hooks.payload_url"}}
+                  @type="input"
+                  @validation="required|url"
+                  as |field|
+                >
+                  <field.Control
+                    placeholder={{i18n
+                      "admin.web_hooks.payload_url_placeholder"
+                    }}
+                  />
+                </form.Field>
+
+                <form.Field
+                  @format="large"
+                  @name="content_type"
+                  @title={{i18n "admin.web_hooks.content_type"}}
+                  @type="select"
+                  @validation="required"
+                  as |field|
+                >
+                  <field.Control as |select|>
+                    {{#each this.contentTypes as |contentType|}}
+                      <select.Option
+                        @value={{contentType.id}}
+                      >{{contentType.name}}</select.Option>
+                    {{/each}}
+                  </field.Control>
+                </form.Field>
+
+                <form.Field
+                  @description={{i18n "admin.web_hooks.secret_placeholder"}}
+                  @format="large"
+                  @name="secret"
+                  @title={{i18n "admin.web_hooks.secret"}}
+                  @type="input"
+                  @validation="length:12"
+                  as |field|
+                >
+                  <field.Control />
+                </form.Field>
+
+                <form.Field
+                  @format="full"
+                  @name="wildcard"
+                  @onSet={{this.setRequirement}}
+                  @title={{i18n "admin.web_hooks.event_chooser"}}
+                  @type="radio-group"
+                  @validation="required"
+                  as |field|
+                >
+                  <field.Control as |radioGroup|>
+                    <radioGroup.Radio @value="individual">
+                      {{i18n "admin.web_hooks.individual_event"}}
+                    </radioGroup.Radio>
+                    {{#if (eq transientData.wildcard "individual")}}
+                      <div class="event-selector">
+                        {{#each-in
+                          this.groupedEventTypes
+                          as |group eventTypes|
+                        }}
+                          <div class="event-group">
+                            {{i18n
+                              (concat
+                                "admin.web_hooks." group "_event.group_name"
+                              )
+                            }}
+                            {{#each eventTypes as |type|}}
+                              <WebhookEventChooser
+                                @eventTypes={{this.webhookEventTypes}}
+                                @group={{group}}
+                                @type={{type}}
+                              />
+                            {{/each}}
+                          </div>
+                        {{/each-in}}
+                      </div>
+                    {{/if}}
+                    <radioGroup.Radio @value="wildcard">
+                      {{i18n "admin.web_hooks.wildcard_event"}}
+                    </radioGroup.Radio>
+                  </field.Control>
+                </form.Field>
+
+                <form.Field
+                  @description={{i18n
+                    "admin.web_hooks.categories_filter_instructions"
+                  }}
+                  @format="large"
+                  @name="categories"
+                  @title={{i18n "admin.web_hooks.categories_filter"}}
+                  @type="custom"
+                  as |field|
+                >
+                  <field.Control>
+                    <CategorySelector
+                      @categories={{field.value}}
+                      @onChange={{field.set}}
+                    />
+                  </field.Control>
+                </form.Field>
+
+                {{#if this.showTagsFilter}}
+                  <form.Field
+                    @description={{i18n
+                      "admin.web_hooks.tags_filter_instructions"
+                    }}
+                    @format="large"
+                    @name="tags"
+                    @title={{i18n "admin.web_hooks.tags_filter"}}
+                    @type="tag-chooser"
+                    as |field|
+                  >
+                    <field.Control
+                      @excludeSynonyms={{true}}
+                      @showAllTags={{true}}
+                    />
+                  </form.Field>
+                {{/if}}
+
+                <form.Field
+                  @description={{i18n
+                    "admin.web_hooks.groups_filter_instructions"
+                  }}
+                  @format="large"
+                  @name="group_names"
+                  @title={{i18n "admin.web_hooks.groups_filter"}}
+                  @type="custom"
+                  as |field|
+                >
+                  <field.Control>
+                    <GroupSelector
+                      @groupFinder={{this.webhook.groupFinder}}
+                      @groupNames={{field.value}}
+                      @onChange={{field.set}}
+                    />
+                  </field.Control>
+                </form.Field>
+
+                <PluginOutlet
+                  @connectorTagName="div"
+                  @name="web-hook-fields"
+                  @outletArgs={{lazyHash model=this.webhook}}
+                />
+
+                <form.Field
+                  @format="large"
+                  @name="verify_certificate"
+                  @showTitle={{false}}
+                  @title={{i18n "admin.web_hooks.verify_certificate"}}
+                  @type="checkbox"
+                  as |field|
+                >
+                  <field.Control />
+                </form.Field>
+
+                <form.Field
+                  @format="large"
+                  @name="active"
+                  @showTitle={{false}}
+                  @title={{i18n "admin.web_hooks.active"}}
+                  @type="checkbox"
+                  as |field|
+                >
+                  <field.Control />
+                </form.Field>
+
+                <form.Actions>
+                  <form.Submit class="save" @label={{this.saveButtonLabel}} />
+                  <form.Button
+                    class="btn-default"
+                    @label="admin.web_hooks.cancel"
+                    @route="adminWebHooks.index"
+                  />
+                </form.Actions>
+              </Form>
+            </DConditionalLoadingSection>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+}

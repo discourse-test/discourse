@@ -1,0 +1,36 @@
+import { concat, fn, hash } from "@ember/helper";
+import { trustHTML } from "@ember/template";
+import ComboBox from "discourse/select-kit/components/combo-box";
+import DInputTip from "discourse/ui-kit/d-input-tip";
+import { i18n } from "discourse-i18n";
+import UserFieldBase from "./base.js";
+
+export default class UserFieldDropdown extends UserFieldBase {
+  <template>
+    <label
+      class="control-label alt-placeholder"
+      for={{concat "user-" this.elementId}}
+    >
+      {{this.field.name}}
+      {{~#unless this.field.required}}
+        {{i18n "user_fields.optional"}}{{/unless~}}
+    </label>
+
+    <div class="controls">
+      <ComboBox
+        @content={{this.field.options}}
+        @id={{concat "user-" this.elementId}}
+        @nameProperty={{null}}
+        @onChange={{fn (mut this.value)}}
+        @options={{hash none=this.noneLabel}}
+        @value={{this.value}}
+        @valueProperty={{null}}
+      />
+      {{#if this.validation.failed}}
+        <DInputTip @validation={{this.validation}} />
+      {{else}}
+        <div class="instructions">{{trustHTML this.field.description}}</div>
+      {{/if}}
+    </div>
+  </template>
+}

@@ -1,0 +1,14 @@
+# frozen_string_literal: true
+
+describe Jobs::CreateGithubLinkback do
+  before do
+    enable_current_plugin
+    SiteSetting.github_linkback_enabled = true
+  end
+
+  it "does not raise an error when the post is missing" do
+    post = Fabricate(:post)
+    post.destroy!
+    expect { Jobs::CreateGithubLinkback.new.execute(post_id: post.id) }.not_to raise_error
+  end
+end

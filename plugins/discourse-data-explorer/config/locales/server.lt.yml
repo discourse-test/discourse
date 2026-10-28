@@ -1,0 +1,15 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+lt:
+  discourse_data_explorer:
+    mcp:
+      query_failed: "Užklausos paleisti nepavyko: %{message}"
+      query_not_found: "Užklausa nerasta"
+    errors:
+      default_tag_reserved: "Numatytoji žyma rezervuota sistemos užklausoms."
+      tag_contains_comma: "Žymose negali būti kablelių."
+      tag_too_long: "Žyma gali turėti daugiausia %{max} simbolių."

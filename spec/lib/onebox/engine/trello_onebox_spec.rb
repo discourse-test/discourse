@@ -1,0 +1,43 @@
+# frozen_string_literal: true
+
+RSpec.describe Onebox::Engine::TrelloOnebox do
+  describe "Boards" do
+    it "oneboxes an SEF URL correctly" do
+      expect(
+        Onebox.preview("https://trello.com/b/nC8QJJoZ/trello-development-roadmap").to_s,
+      ).to match('iframe src="https://trello.com/b/nC8QJJoZ.html"')
+    end
+
+    it "oneboxes a non-SEF URL correctly" do
+      expect(Onebox.preview("https://trello.com/b/nC8QJJoZ/").to_s).to match(
+        'iframe src="https://trello.com/b/nC8QJJoZ.html"',
+      )
+
+      # Without trailing slash
+      expect(Onebox.preview("https://trello.com/b/nC8QJJoZ").to_s).to match(
+        'iframe src="https://trello.com/b/nC8QJJoZ.html"',
+      )
+    end
+  end
+
+  describe "Cards" do
+    it "oneboxes an SEF URL correctly" do
+      expect(
+        Onebox.preview(
+          "https://trello.com/c/NIRpzVDM/1211-what-can-you-expect-from-this-board",
+        ).to_s,
+      ).to match('iframe src="https://trello.com/c/NIRpzVDM.html"')
+    end
+
+    it "oneboxes a non-SEF URL correctly" do
+      expect(Onebox.preview("https://trello.com/c/NIRpzVDM/").to_s).to match(
+        'iframe src="https://trello.com/c/NIRpzVDM.html"',
+      )
+
+      # Without trailing slash
+      expect(Onebox.preview("https://trello.com/c/NIRpzVDM").to_s).to match(
+        'iframe src="https://trello.com/c/NIRpzVDM.html"',
+      )
+    end
+  end
+end

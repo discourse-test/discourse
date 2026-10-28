@@ -1,0 +1,123 @@
+/* eslint-disable ember/no-tracked-properties-from-args */
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { fn, hash } from "@ember/helper";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import { popupAjaxError } from "discourse/lib/ajax-error";
+import { timeShortcuts } from "discourse/lib/time-shortcut";
+import User from "discourse/models/user";
+import EmailGroupUserChooser from "discourse/select-kit/components/email-group-user-chooser";
+import DButton from "discourse/ui-kit/d-button";
+import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
+import DFutureDateInput from "discourse/ui-kit/d-future-date-input";
+import DModal from "discourse/ui-kit/d-modal";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import { i18n } from "discourse-i18n";
+
+export default class IgnoreDurationModal extends Component {
+  @service currentUser;
+
+  @tracked flash;
+
+  @tracked loading = false;
+
+  /** @type {string | null} */
+  @tracked ignoredUntil = null;
+  @tracked ignoredUsername = this.args.model.ignoredUsername;
+
+  enableSelection = this.args.model.enableSelection ?? true;
+
+  get timeShortcuts() {
+    const timezone = this.currentUser.user_option.timezone;
+    const shortcuts = timeShortcuts(timezone);
+    return [
+      shortcuts.laterToday(),
+      shortcuts.tomorrow(),
+      shortcuts.laterThisWeek(),
+      shortcuts.thisWeekend(),
+      shortcuts.monday(),
+      shortcuts.twoWeeks(),
+      shortcuts.nextMonth(),
+      shortcuts.twoMonths(),
+      shortcuts.threeMonths(),
+      shortcuts.fourMonths(),
+      shortcuts.sixMonths(),
+      shortcuts.oneYear(),
+      shortcuts.forever(),
+    ];
+  }
+
+  @action
+  ignore() {
+    if (!this.ignoredUntil || !this.ignoredUsername) {
+      this.flash = i18n(
+        "user.user_notifications.ignore_duration_time_frame_required"
+      );
+      return;
+    }
+    this.loading = true;
+    User.findByUsername(this.ignoredUsername).then((user) => {
+      user
+        .updateNotificationLevel({
+          level: "ignore",
+          expiringAt: this.ignoredUntil,
+          actingUser: this.args.model.actingUser,
+        })
+        .then(() => {
+          this.args.model.onUserIgnored?.(this.ignoredUsername);
+          this.args.closeModal();
+        })
+        .catch(popupAjaxError)
+        .finally(() => (this.loading = false));
+    });
+  }
+
+  @action
+  updateIgnoredUsername(selected) {
+    this.ignoredUsername = selected.firstObject;
+  }
+
+  <template>
+    <DModal
+      class="ignore-duration-with-username-modal"
+      @autoFocus="false"
+      @closeModal={{@closeModal}}
+      @flash={{this.flash}}
+      @title={{i18n "user.user_notifications.ignore_duration_title"}}
+    >
+      <:body>
+        {{#if this.enableSelection}}
+          <div class="controls tracking-controls">
+            <label>{{dIcon "far-eye-slash" class="icon"}}
+              {{i18n
+                "user.user_notifications.ignore_duration_username"
+              }}</label>
+            <EmailGroupUserChooser
+              @onChange={{this.updateIgnoredUsername}}
+              @options={{hash excludeCurrentUser=true maximum=1}}
+              @value={{this.ignoredUsername}}
+            />
+          </div>
+        {{/if}}
+        <DFutureDateInput
+          @customShortcuts={{this.timeShortcuts}}
+          @includeDateTime={{false}}
+          @input={{readonly this.ignoredUntil}}
+          @label="user.user_notifications.ignore_duration_when"
+          @onChangeInput={{fn (mut this.ignoredUntil)}}
+        />
+        <p>{{i18n "user.user_notifications.ignore_duration_note"}}</p>
+      </:body>
+      <:footer>
+        <DButton
+          class="btn-primary"
+          @action={{this.ignore}}
+          @disabled={{this.saveDisabled}}
+          @label="user.user_notifications.ignore_duration_save"
+        />
+        <DConditionalLoadingSpinner @condition={{this.loading}} @size="small" />
+      </:footer>
+    </DModal>
+  </template>
+}

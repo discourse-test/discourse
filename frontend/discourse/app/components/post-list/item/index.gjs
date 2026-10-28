@@ -1,0 +1,191 @@
+import Component from "@glimmer/component";
+import { fn } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
+import ExpandPost from "discourse/components/expand-post";
+import PostListItemDetails from "discourse/components/post-list/item/details";
+import { userPath } from "discourse/lib/url";
+import DButton from "discourse/ui-kit/d-button";
+import DDecoratedHtml from "discourse/ui-kit/d-decorated-html";
+import dAvatar from "discourse/ui-kit/helpers/d-avatar";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+
+export default class PostListItem extends Component {
+  @service site;
+  @service currentUser;
+
+  get moderatorActionClass() {
+    return this.args.post.post_type === this.site.post_types.moderator_action
+      ? "moderator-action"
+      : "";
+  }
+
+  get primaryGroupClass() {
+    if (this.args.post.user && this.args.post.user.primary_group_name) {
+      return `group-${this.args.post.user.primary_group_name}`;
+    }
+  }
+
+  get hiddenClass() {
+    return this.args.post.hidden && !this.currentUser?.staff;
+  }
+
+  get deletedClass() {
+    return this.args.post.deleted ? "deleted" : "";
+  }
+
+  get user() {
+    return {
+      id: this.args.post.user_id,
+      name: this.args.post.name,
+      username: this.args.usernamePath
+        ? this.args.post[this.args.usernamePath]
+        : this.args.post.username,
+      avatar_template: this.args.post.avatar_template,
+      title: this.args.post.user_title,
+      primary_group_name: this.args.post.primary_group_name,
+    };
+  }
+
+  get postId() {
+    return this.args.idPath
+      ? this.args.post[this.args.idPath]
+      : this.args.post.id;
+  }
+
+  get isDraft() {
+    return this.args.post.constructor.name === "UserDraft";
+  }
+
+  get draftIcon() {
+    const key = this.args.post.draft_key;
+
+    if (key.startsWith("new_private_message")) {
+      return "envelope";
+    } else if (key.startsWith("new_topic")) {
+      return "layer-group";
+    } else {
+      return "reply";
+    }
+  }
+
+  get isSelected() {
+    if (!this.args.bulkSelectEnabled || !this.args.bulkSelectHelper) {
+      return false;
+    }
+    return this.args.bulkSelectHelper.isSelected(this.args.post);
+  }
+
+  get itemClasses() {
+    return dConcatClass(
+      "post-list-item",
+      this.moderatorActionClass,
+      this.primaryGroupClass,
+      this.hiddenClass,
+      this.args.additionalItemClasses,
+      this.isSelected ? "post-list-item--selected" : ""
+    );
+  }
+
+  @action
+  toggleSelection(event) {
+    if (this.args.bulkSelectHelper) {
+      this.args.bulkSelectHelper.togglePost(this.args.post, {
+        shiftKey: event?.shiftKey || false,
+      });
+    }
+  }
+
+  <template>
+    <div class={{this.itemClasses}}>
+      {{yield to="abovePostItemHeader"}}
+
+      <div class="post-list-item__header info">
+        {{#if @bulkSelectEnabled}}
+          <div class="post-list-item__bulk-select">
+            <input
+              checked={{this.isSelected}}
+              class="bulk-select-checkbox"
+              type="checkbox"
+              {{on "click" this.toggleSelection}}
+            />
+          </div>
+        {{/if}}
+
+        {{#if this.isDraft}}
+          <div class="draft-icon">
+            {{dIcon this.draftIcon class="icon"}}
+          </div>
+        {{else}}
+          <a
+            class="avatar-link"
+            data-user-card={{this.user.username}}
+            href={{userPath this.user.username}}
+          >
+            <div class="avatar-wrapper">
+              {{dAvatar
+                this.user
+                imageSize="large"
+                extraClasses="actor"
+                ignoreTitle="true"
+              }}
+            </div>
+          </a>
+        {{/if}}
+
+        <PostListItemDetails
+          @isDraft={{this.isDraft}}
+          @post={{@post}}
+          @resumeDraft={{@resumeDraft}}
+          @showUserInfo={{@showUserInfo}}
+          @titleAriaLabel={{@titleAriaLabel}}
+          @titlePath={{@titlePath}}
+          @urlPath={{@urlPath}}
+          @user={{this.user}}
+        />
+
+        {{#unless @post.draftType}}
+          <ExpandPost @item={{@post}} />
+        {{/unless}}
+
+        {{#if @post.editableDraft}}
+          <div class="user-stream-item-draft-actions">
+            <DButton
+              class="btn-default resume-draft"
+              @action={{fn @resumeDraft @post}}
+              @icon="pencil"
+              @title="drafts.resume"
+            />
+            <DButton
+              class="btn-danger remove-draft"
+              @action={{fn @removeDraft @post}}
+              @icon="trash-can"
+              @title="drafts.remove"
+            />
+          </div>
+        {{/if}}
+
+        {{yield to="belowPostItemMetadata"}}
+      </div>
+
+      {{yield to="abovePostItemExcerpt"}}
+
+      <div
+        class="excerpt"
+        data-post-id={{this.postId}}
+        data-topic-id={{@post.topic_id}}
+        data-user-id={{@post.user_id}}
+      >
+        <DDecoratedHtml
+          @className="cooked"
+          @html={{trustHTML (or @post.expandedExcerpt @post.excerpt)}}
+        />
+      </div>
+
+      {{yield to="belowPostItem"}}
+    </div>
+  </template>
+}

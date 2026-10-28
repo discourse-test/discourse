@@ -1,0 +1,29 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+be:
+  js:
+    explorer:
+      or: "або"
+      ai:
+        generate: "згенераваць"
+      types:
+        bool:
+          yes: "Так"
+          no: "Не"
+      delete: "Выдаліць"
+      name: "Імя"
+      query_groups: "групы"
+      query_tags: "Цэтлікі"
+      query_description: "Апісанне"
+      reset_params: "скінуць"
+    group:
+      reports: "Справаздачы"
+    discourse_workflows:
+      sql:
+        param_value: "Значэнне"
+        output:
+          results: "Вынікі"

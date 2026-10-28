@@ -1,0 +1,111 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import { logOnboardingEvent } from "discourse/lib/admin-onboarding";
+import DButton from "discourse/ui-kit/d-button";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import { i18n } from "discourse-i18n";
+
+export default class OnboardingStep extends Component {
+  static name() {
+    throw new Error("Name is required for OnboardingStep");
+  }
+
+  @service keyValueStore;
+  @service appEvents;
+
+  @tracked
+  completed = this.keyValueStore.get(`onboarding_step_${this.name}`) || false;
+
+  i18nKey = "admin_onboarding_banner.";
+
+  get name() {
+    return this.constructor.name;
+  }
+
+  get checkboxIcon() {
+    return this.completed ? "circle-check" : "far-circle";
+  }
+
+  get title() {
+    return i18n(`${this.i18nKey}${this.name}.title`);
+  }
+
+  get description() {
+    return i18n(`${this.i18nKey}${this.name}.description`);
+  }
+
+  get buttonLabel() {
+    return `${this.i18nKey}${this.name}.${this.completed ? "completed" : "action"}`;
+  }
+
+  @action
+  performAction() {
+    throw new Error("performAction is required for OnboardingStep");
+  }
+
+  // Steps whose action needs slow-to-arrive data can warm it up here, so the
+  // work overlaps with the admin reaching for the button.
+  @action
+  prefetch() {}
+
+  // Awaits the audit write so callers that reload the page on completion can't
+  // cancel it in flight.
+  async markAsCompleted(options = {}) {
+    // app events backing some steps can fire more than once, so only audit the
+    // first transition into the completed state
+    const alreadyCompleted = this.completed;
+
+    this.keyValueStore.set({
+      key: `onboarding_step_${this.name}`,
+      value: true,
+    });
+    this.completed = true;
+    this.appEvents.trigger(`onboarding-step:completed`, this.name);
+
+    if (!alreadyCompleted) {
+      await logOnboardingEvent(
+        "step_completed",
+        this.name,
+        options?.topicOption
+      );
+    }
+
+    return this.args.onCompleted?.(this.name);
+  }
+
+  <template>
+    <div class="onboarding-step" id={{this.name}}>
+      <div class="onboarding-step__checkbox">
+        {{~dIcon
+          this.checkboxIcon
+          class=(dConcatClass
+            "onboarding-step__checkbox-icon" (if this.completed "--completed")
+          )
+        }}
+        <span class="onboarding-step__title">{{this.title}}</span>
+
+      </div>
+
+      <div class="onboarding-step__description">
+        {{this.description}}
+      </div>
+      <div class="onboarding-step__action">
+        <DButton
+          class={{dConcatClass
+            "btn-transparent btn-small btn-link"
+            (if this.completed "--completed")
+          }}
+          @action={{this.performAction}}
+          @label={{this.buttonLabel}}
+          {{on "pointerenter" this.prefetch}}
+          {{on "focus" this.prefetch}}
+        />
+
+      </div>
+    </div>
+  </template>
+}

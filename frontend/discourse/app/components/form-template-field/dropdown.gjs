@@ -1,0 +1,47 @@
+import { on } from "@ember/modifier";
+import { trustHTML } from "@ember/template";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+
+const Dropdown = <template>
+  <div class="control-group form-template-field" data-field-type="dropdown">
+    {{#if @attributes.label}}
+      <label class="form-template-field__label">
+        {{@attributes.label}}
+        {{#if @validations.required}}
+          {{dIcon "asterisk" class="form-template-field__required-indicator"}}
+        {{/if}}
+      </label>
+    {{/if}}
+
+    {{#if @attributes.description}}
+      <span class="form-template-field__description">
+        {{trustHTML @attributes.description}}
+      </span>
+    {{/if}}
+
+    <select
+      class="form-template-field__dropdown"
+      name={{@id}}
+      required={{if @validations.required "required" ""}}
+      {{on "input" @onChange}}
+    >
+      {{#if @attributes.none_label}}
+        <option
+          class="form-template-field__dropdown-placeholder"
+          disabled
+          hidden
+          selected
+          value
+        >{{@attributes.none_label}}</option>
+      {{/if}}
+      {{#each @choices as |choice|}}
+        <option
+          selected={{eq @value choice}}
+          value={{choice}}
+        >{{choice}}</option>
+      {{/each}}
+    </select>
+  </div>
+</template>;
+
+export default Dropdown;

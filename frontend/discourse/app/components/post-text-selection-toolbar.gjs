@@ -1,0 +1,164 @@
+import Component from "@glimmer/component";
+import { fn } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import lazyHash from "discourse/helpers/lazy-hash";
+import { getAbsoluteURL } from "discourse/lib/get-url";
+import Sharing from "discourse/lib/sharing";
+import { clipboardCopyAsync, postUrl } from "discourse/lib/utilities";
+import DButton from "discourse/ui-kit/d-button";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import { i18n } from "discourse-i18n";
+
+export default class PostTextSelectionToolbar extends Component {
+  @service currentUser;
+  @service site;
+  @service siteSettings;
+  @service toasts;
+
+  get topic() {
+    return this.args.data.topic;
+  }
+
+  get quoteState() {
+    return this.args.data.quoteState;
+  }
+
+  get post() {
+    return this.topic.postStream.findLoadedPost(
+      this.args.data.quoteState.postId
+    );
+  }
+
+  get quoteSharingEnabled() {
+    return (
+      this.site.desktopView &&
+      this.quoteSharingSources.length > 0 &&
+      !this.topic.invisible &&
+      !this.topic.category?.read_restricted &&
+      (this.siteSettings.share_quote_visibility === "all" ||
+        (this.siteSettings.share_quote_visibility === "anonymous" &&
+          !this.currentUser))
+    );
+  }
+
+  get quoteSharingSources() {
+    return Sharing.activeSources(
+      this.siteSettings.share_quote_buttons,
+      this.siteSettings.login_required || this.topic.isPrivateMessage
+    );
+  }
+
+  get shareUrl() {
+    return getAbsoluteURL(
+      postUrl(this.topic.slug, this.topic.id, this.post.post_number)
+    );
+  }
+
+  get embedQuoteButton() {
+    const canCreatePost = this.topic.details.can_create_post;
+    const canReplyAsNewTopic = this.topic.details.can_reply_as_new_topic;
+
+    return (
+      (canCreatePost || canReplyAsNewTopic) &&
+      this.currentUser?.get("user_option.enable_quoting")
+    );
+  }
+
+  @action
+  async copyQuoteToClipboard() {
+    await clipboardCopyAsync(() =>
+      this.args.data
+        .buildQuote()
+        .then((text) => new Blob([text], { type: "text/plain" }))
+    );
+    this.toasts.success({
+      duration: "short",
+      data: { message: i18n("post.quote_copied_to_clipboard") },
+    });
+    await this.args.data.hideToolbar();
+  }
+
+  @action
+  share(source) {
+    Sharing.shareSource(source, {
+      url: this.shareUrl,
+      title: this.topic.title,
+      quote: window.getSelection().toString(),
+    });
+  }
+
+  <template>
+    <div class={{dConcatClass "quote-button" "visible"}}>
+      <div class="buttons">
+        <PluginOutlet
+          @defaultGlimmer={{true}}
+          @name="post-text-buttons"
+          @outletArgs={{lazyHash data=@data post=this.post}}
+        >
+          {{#if this.embedQuoteButton}}
+            <DButton
+              class="btn-flat insert-quote"
+              @action={{@data.insertQuote}}
+              @icon="quote-left"
+              @label="post.quote_reply"
+              @title="post.quote_reply_shortcut"
+            />
+          {{/if}}
+
+          {{#if @data.canEditPost}}
+            <DButton
+              class="btn-flat quote-edit-label"
+              @icon="pencil"
+              @label="post.quote_edit"
+              @title="post.quote_edit_shortcut"
+              {{on
+                "click"
+                (fn @data.toggleFastEdit this.quoteState @data.supportsFastEdit)
+              }}
+            />
+          {{/if}}
+
+          {{#if @data.canCopyQuote}}
+            <DButton
+              class="btn-flat copy-quote"
+              @icon="copy"
+              @label="post.quote_copy"
+              @title="post.quote_copy"
+              {{on "click" this.copyQuoteToClipboard}}
+            />
+          {{/if}}
+
+          <PluginOutlet
+            @connectorTagName="span"
+            @name="quote-share-buttons-before"
+            @outletArgs={{lazyHash data=@data}}
+          />
+
+          {{#if this.quoteSharingEnabled}}
+            {{#each this.quoteSharingSources as |source|}}
+              <DButton
+                class="btn-flat"
+                @action={{fn this.share source}}
+                @icon={{source.icon}}
+                @translatedTitle={{source.title}}
+              />
+            {{/each}}
+
+            <PluginOutlet
+              @connectorTagName="span"
+              @name="quote-share-buttons-after"
+              @outletArgs={{lazyHash data=@data}}
+            />
+          {{/if}}
+        </PluginOutlet>
+      </div>
+
+      <div class="extra">
+        <PluginOutlet @connectorTagName="div" @name="quote-button-after" />
+      </div>
+    </div>
+  </template>
+}

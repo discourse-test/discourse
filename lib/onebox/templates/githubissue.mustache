@@ -1,0 +1,36 @@
+<div class="github-row" data-github-private-repo="{{is_private}}">
+  <div class="github-info-container">
+    <h4>
+      <a href="{{link}}" target="_blank" rel="noopener">{{title}}</a>
+    </h4>
+
+    <div class="github-info">
+      <div class="date">
+        {{i18n.opened}} <span class="discourse-local-date" data-format="ll" data-date="{{created_at_date}}" data-time="{{created_at_time}}" data-timezone="UTC">{{created_at}}</span>
+      </div>
+
+      {{#closed_at}}
+        <div class="date">
+          {{i18n.closed}} <span class="discourse-local-date" data-format="ll" data-date="{{closed_at_date}}" data-time="{{closed_at_time}}" data-timezone="UTC">{{closed_at}}</span>
+        </div>
+      {{/closed_at}}
+
+      <div class="user">
+        <a href="{{user.html_url}}" target="_blank" rel="noopener">
+          <img alt="" src="{{user.avatar_url}}" class="onebox-avatar-inline" width="20" height="20">
+          {{user.login}}
+        </a>
+      </div>
+    </div>
+
+    <div class="labels">
+      {{#labels}}
+        <span style="display:inline-block;margin-top:2px;background-color: #B8B8B8;padding: 2px;border-radius: 4px;color: #fff;margin-left: 3px;">
+          {{{name}}}
+        </span>
+      {{/labels}}
+    </div>
+  </div>
+</div>
+
+{{> github/github_body}}

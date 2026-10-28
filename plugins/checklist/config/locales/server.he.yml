@@ -1,0 +1,13 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+he:
+  site_settings:
+    checklist_enabled: "להפעיל תוסף רשימת קניות?"
+  checklist:
+    checkboxes_changed: "הפוסט הזה השתנה מאז שנטען. יש לרענן ולנסות שוב."
+    checkbox_locked: "אי אפשר לשנות את פריט רשימת הסימון."
+    revision_failed: "אי אפשר לעדכן את תיבת הסימון הזאת."

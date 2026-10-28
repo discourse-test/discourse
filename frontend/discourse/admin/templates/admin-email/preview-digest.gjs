@@ -1,0 +1,114 @@
+import { hash } from "@ember/helper";
+import { on } from "@ember/modifier";
+import DatePickerPast from "discourse/components/date-picker-past";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import EmailGroupUserChooser from "discourse/select-kit/components/email-group-user-chooser";
+import DButton from "discourse/ui-kit/d-button";
+import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
+import DPageSubheader from "discourse/ui-kit/d-page-subheader";
+import DTextField from "discourse/ui-kit/d-text-field";
+import { i18n } from "discourse-i18n";
+
+export default <template>
+  <PluginOutlet @name="admin-email-preview-digest">
+    <DPageSubheader
+      @descriptionLabel={{i18n
+        "admin.config.email.sub_pages.preview_summary.header_description"
+      }}
+    />
+
+    <div class="admin-controls email-preview">
+      <div class="controls">
+        <div class="inline-form">
+          <label for="last-seen">{{i18n "admin.email.last_seen_user"}}</label>
+          <DatePickerPast @id="last-seen" @value={{@controller.lastSeen}} />
+          <label>{{i18n "admin.email.user"}}:</label>
+          <EmailGroupUserChooser
+            @onChange={{@controller.updateUsername}}
+            @options={{hash
+              maximum=1
+              caretDownIcon="angle-down"
+              caretUpIcon="angle-up"
+            }}
+            @value={{@controller.username}}
+          />
+          <DButton
+            class="btn-primary digest-refresh-button"
+            @action={{@controller.refresh}}
+            @label="admin.email.refresh"
+          />
+          <div class="toggle">
+            <label>{{i18n "admin.email.format"}}</label>
+            {{#if @controller.showHtml}}
+              <span>{{i18n "admin.email.html"}}</span>
+              |
+              <a
+                class="show-text-link"
+                href
+                {{on "click" @controller.toggleShowHtml}}
+              >
+                {{i18n "admin.email.text"}}
+              </a>
+            {{else}}
+              <a
+                class="show-html-link"
+                href
+                {{on "click" @controller.toggleShowHtml}}
+              >{{i18n "admin.email.html"}}</a>
+              |
+              <span>{{i18n "admin.email.text"}}</span>
+            {{/if}}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <DConditionalLoadingSpinner @condition={{@controller.loading}}>
+
+      <div class="email-preview-digest">
+        {{#if @controller.showSendEmailForm}}
+          <div class="controls">
+            <div class="inline-form">
+              {{#if @controller.sendingEmail}}
+                {{i18n "admin.email.sending_test"}}
+              {{else}}
+                <label>{{i18n "admin.email.send_digest_label"}}</label>
+                <DTextField
+                  @placeholderKey="admin.email.test_email_address"
+                  @value={{@controller.email}}
+                />
+                <DButton
+                  class="btn-default"
+                  @action={{@controller.sendEmail}}
+                  @disabled={{@controller.sendEmailDisabled}}
+                  @label="admin.email.send_digest"
+                />
+                {{#if @controller.sentEmail}}
+                  <span class="result-message">{{i18n
+                      "admin.email.sent_test"
+                    }}</span>
+                {{/if}}
+              {{/if}}
+            </div>
+          </div>
+        {{/if}}
+
+        <div class="preview-output">
+          {{#if @controller.showHtml}}
+            {{#if @controller.htmlEmpty}}
+              <p>{{i18n "admin.email.no_result"}}</p>
+            {{else}}
+              <iframe
+                srcdoc={{@controller.model.html_content}}
+                title={{i18n "admin.email.html_preview"}}
+              ></iframe>
+            {{/if}}
+          {{else}}
+            <pre>{{@controller.model.text_content}}</pre>
+          {{/if}}
+        </div>
+      </div>
+
+    </DConditionalLoadingSpinner>
+  </PluginOutlet>
+</template>

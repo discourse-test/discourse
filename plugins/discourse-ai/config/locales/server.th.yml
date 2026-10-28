@@ -1,0 +1,58 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+th:
+  reports:
+    overall_sentiment:
+      yaxis: "วันที่"
+  discourse_ai:
+    ai_bot:
+      navigation:
+        users:
+          title: "ผู้ใช้"
+        groups:
+          title: "กลุ่ม"
+        categories:
+          title: "หมวดหมู่"
+        tags:
+          title: "ป้าย"
+        themes:
+          title: "ธีม"
+        backups:
+          title: "สำรอง"
+      read_post:
+        unknown_post: "โพส"
+      chat_tool_approval:
+        topic_states:
+          open: "เปิด"
+          closed: "ปิด"
+          active: "ใช้งานอยู่"
+          deleted: "ลบ"
+        solution_post: "โพสต์ #%{number}"
+        duration_label: "ช่วงเวลา:"
+        user_duration:
+          other: "%{count} วัน"
+        posts_label: "โพส"
+        category_label: "หมวดหมู่"
+        category_fields:
+          name: "ชื่อ"
+          description: "รายละเอียด"
+          color: "สี"
+        approve_label: "ใช่"
+        reject_label: "ไม่ใช่"
+      tool_summary:
+        search: "ค้นหา"
+        time: "เวลา"
+      tool_help:
+        create_category: "สร้างหมวดหมู่ใหม่"
+    reviewables:
+      ai_tool_action:
+        approve:
+          title: "อนุมัติ"
+        reject:
+          title: "ละทิ้ง"
+    ai_staff_action_logger:
+      updated: "อัปเดตแล้ว"

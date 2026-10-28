@@ -1,0 +1,42 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+pl_PL:
+  site_settings:
+    enable_discourse_github_plugin: "Włącz wtyczkę discourse-github"
+    github_linkback_enabled: "Połącz problemy z GitHub z dyskusjami na forum"
+    github_linkback_projects: "Lista projektów do odsyłania"
+    github_linkback_access_token: 'Ważny token dostępu dla użytkownika, który opublikuje link zwrotny oraz do liczenia commitów/wkładów w celu przyznania odznak. Zerknij <a href="https://meta.discourse.org/t/99895">tutaj</a>, aby uzyskać instrukcje, jak zdobyć token.'
+    github_linkback_maximum_links: "Maksymalna liczba linków zwrotnych, jakie można utworzyć z jednego wpisu. Jeśli wpis zawiera więcej linków, żaden nie zostanie utworzony."
+    github_permalinks_enabled: "Włącz nadpisywanie stałych linków GitHub"
+    github_pr_status_enabled: "Pokaż status żądania ściągnięcia GitHub na oneboxach (wersja robocza, otwarta, zatwierdzona, scalona, zamknięta)"
+    github_webhook_secret: "Tajny token do weryfikacji podpisu webhooka GitHub. Skonfiguruj tę wartość w ustawieniach webhooka GitHub."
+    github_permalinks_exclude: "Nazwa pliku lub katalogu, który ma zostać wykluczony z nadpisywania permalinków. Podaj tylko nazwę pliku lub pełną ścieżkę: użytkownik/repozytorium/katalog-opcjonalny/nazwa-pliku"
+    github_badges_enabled: "Włącz odznaki GitHub"
+    github_badges_repos: "Adresy URL repozytoriów GitHub do skanowania w poszukiwaniu wkładów i zatwierdzeń"
+    github_silver_badge_min_commits: "Minimalna liczba commitów dla srebrnej odznaki"
+    github_gold_badge_min_commits: "Minimalna liczba commitów dla złotej odznaki"
+    errors:
+      invalid_badge_repo: "Należy podać adres URL serwisu GitHub lub nazwę repozytorium w formacie użytkownik_github/nazwa_repozytorium"
+      invalid_badge_repo_value: "„%{repo}” nie jest prawidłowym adresem URL ani nazwą repozytorium GitHub. Użyj formatu github_user/repository_name."
+  github_linkback:
+    commit_template: |
+      Ten commit został wspomniany w **%{title}**. Mogą tam być istotne szczegóły:
+
+      %{post_url}
+    pr_template: |
+      Ten pull request został wspomniany na stronie **%{title}**. Mogą tam być istotne szczegóły:
+
+      %{post_url}
+    issue_template: |
+      Ten problem został wspomniany na **%{title}**. Mogą tam być istotne szczegóły:
+
+      %{post_url}
+  dashboard:
+    problem:
+      github_linkback_access_token_invalid: "GitHub odrzucił {{setting:github_linkback_access_token}}. Wygeneruj nowy token i zaktualizuj ustawienie."
+      github_badges_repo_not_found: "Repozytorium GitHub <code>%{repo}</code> w {{setting:github_badges_repos}} nie istnieje lub {{setting:github_linkback_access_token}} nie ma do niego dostępu, więc jego wkład nie jest liczony do odznak."
+      github_badges_repo_moved: "Repozytorium GitHub <code>%{repo}</code> zostało przeniesione do <code>%{new_name}</code>. Zaktualizuj {{setting:github_badges_repos}} , aby używać nowej nazwy."

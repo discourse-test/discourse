@@ -1,0 +1,78 @@
+import { render } from "@ember/test-helpers";
+import { module, test } from "qunit";
+import { setupRenderingTest } from "discourse/tests/helpers/component-test";
+import ChatUserDisplayName from "discourse/plugins/chat/discourse/components/chat-user-display-name";
+
+module(
+  "Component | ChatUserDisplayName | prioritize username in UX",
+  function (hooks) {
+    setupRenderingTest(hooks);
+
+    test("username and no name", async function (assert) {
+      this.siteSettings.prioritize_username_in_ux = true;
+      this.set("user", { username: "bob", name: null });
+
+      await render(
+        <template><ChatUserDisplayName @user={{this.user}} /></template>
+      );
+
+      assert.dom(".chat-user-display-name").hasText("bob");
+    });
+
+    test("username and name", async function (assert) {
+      this.siteSettings.prioritize_username_in_ux = true;
+      this.set("user", { username: "bob", name: "Bobcat" });
+
+      await render(
+        <template><ChatUserDisplayName @user={{this.user}} /></template>
+      );
+
+      assert.dom(".chat-user-display-name").hasText("bob Bobcat");
+    });
+  }
+);
+
+module("Component | ChatUserDisplayName | names disabled", function (hooks) {
+  setupRenderingTest(hooks);
+
+  test("does not display a user's name", async function (assert) {
+    this.siteSettings.enable_names = false;
+    this.siteSettings.prioritize_username_in_ux = false;
+    this.set("user", { username: "bob", name: "Bobcat" });
+
+    await render(
+      <template><ChatUserDisplayName @user={{this.user}} /></template>
+    );
+
+    assert.dom(".chat-user-display-name").hasText("bob");
+  });
+});
+
+module(
+  "Component | ChatUserDisplayName | prioritize name in UX",
+  function (hooks) {
+    setupRenderingTest(hooks);
+
+    test("no name", async function (assert) {
+      this.siteSettings.prioritize_username_in_ux = false;
+      this.set("user", { username: "bob", name: null });
+
+      await render(
+        <template><ChatUserDisplayName @user={{this.user}} /></template>
+      );
+
+      assert.dom(".chat-user-display-name").hasText("bob");
+    });
+
+    test("name and username", async function (assert) {
+      this.siteSettings.prioritize_username_in_ux = false;
+      this.set("user", { username: "bob", name: "Bobcat" });
+
+      await render(
+        <template><ChatUserDisplayName @user={{this.user}} /></template>
+      );
+
+      assert.dom(".chat-user-display-name").hasText("Bobcat bob");
+    });
+  }
+);

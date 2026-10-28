@@ -1,0 +1,23 @@
+import CategoryNotificationsTracking from "discourse/components/category-notifications-tracking";
+import BaseField from "./da-base-field.gjs";
+import DAFieldDescription from "./da-field-description.gjs";
+import DAFieldLabel from "./da-field-label.gjs";
+
+export default class CategoryNotificationLevelField extends BaseField {
+  <template>
+    <section class="field category-notification-level-field">
+      <div class="control-group">
+        <DAFieldLabel @field={{@field}} @label={{@label}} />
+
+        <div class="controls">
+          <CategoryNotificationsTracking
+            @levelId={{@field.metadata.value}}
+            @onChange={{this.mutValue}}
+          />
+
+          <DAFieldDescription @description={{@description}} />
+        </div>
+      </div>
+    </section>
+  </template>
+}

@@ -1,0 +1,78 @@
+/* eslint-disable ember/no-tracked-properties-from-args */
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import { ajax } from "discourse/lib/ajax";
+import { popupAjaxError } from "discourse/lib/ajax-error";
+import DButton from "discourse/ui-kit/d-button";
+import PostVotingCommentComposer from "./post-voting-comment-composer.gjs";
+
+export default class PostVotingCommentEditor extends Component {
+  @service siteSettings;
+
+  @tracked value = this.args.raw;
+  @tracked submitDisabled = true;
+
+  @action
+  updateValue(value) {
+    this.value = value;
+    this.submitDisabled =
+      value.length < this.siteSettings.min_post_length ||
+      value.length > this.siteSettings.post_voting_comment_max_raw_length;
+  }
+
+  @action
+  onKeyDown(e) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      this.saveComment();
+    }
+  }
+
+  @action
+  saveComment() {
+    this.submitDisabled = true;
+
+    const data = {
+      comment_id: this.args.id,
+      raw: this.value,
+    };
+
+    return ajax("/post_voting/comments", {
+      type: "PUT",
+      data,
+    })
+      .then(this.args.onSave)
+      .catch(popupAjaxError)
+      .finally(() => {
+        this.submitDisabled = false;
+      });
+  }
+
+  <template>
+    <div
+      class="post-voting-comments__comment-editor post-voting-comments__comment-editor-{{@id}}"
+    >
+      <PostVotingCommentComposer
+        @onInput={{this.updateValue}}
+        @onKeyDown={{this.onKeyDown}}
+        @raw={{@raw}}
+      />
+
+      <DButton
+        class="btn-primary post-voting-comments__comment-editor-submit"
+        @action={{this.saveComment}}
+        @disabled={{this.submitDisabled}}
+        @icon="pencil"
+        @label="post_voting.post.post_voting_comment.edit"
+      />
+
+      <DButton
+        class="post-voting-comments__comment-editor-cancel"
+        @action={{@onCancel}}
+        @display="link"
+        @label="post_voting.post.post_voting_comment.cancel"
+      />
+    </div>
+  </template>
+}

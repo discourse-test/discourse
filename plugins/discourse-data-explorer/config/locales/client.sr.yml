@@ -1,0 +1,33 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+sr:
+  js:
+    explorer:
+      or: "ili"
+      ai:
+        generate: "Generiši"
+      types:
+        bool:
+          yes: "Da"
+          no: "Ne"
+      delete: "Obriši"
+      chart:
+        form:
+          label: "Tip grafikona"
+          bar: "Dijagram"
+        tooltip:
+          total: "Ukupno: %{count}"
+      name: "Ime foruma"
+      query_groups: "Grupe"
+      query_tags: "Tagovi"
+      query_description: "Opis"
+      reset_params: "Reset"
+    discourse_workflows:
+      sql:
+        param_value: "Vriednost"
+        output:
+          results: "Rezultati"

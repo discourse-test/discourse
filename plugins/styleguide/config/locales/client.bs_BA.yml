@@ -1,0 +1,51 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+bs_BA:
+  js:
+    styleguide:
+      example:
+        kind:
+          component: "Komponenta"
+      sections:
+        context_menu:
+          actions:
+            delete: "Delete"
+        reorderable_list:
+          policies_pinned: "Zakačena"
+          policies_required: "Required"
+          table_type: "Tip"
+        colors:
+          title: "Colors"
+        categories:
+          title: "Kategorije"
+        navigation:
+          title: "Navigacija"
+        categories_list:
+          title: "Lista Kategorija"
+        topic_timer_info:
+          title: "Trajanje tema"
+        post:
+          title: "Objava"
+        more_topics:
+          title: "Još tema"
+        roving_focus:
+          toolbar:
+            copy: "Copy"
+          adjacent:
+            field: "Pretraži"
+            open: "Otvori"
+            recent: "Nove"
+          combobox:
+            daily: "Dnevno"
+            weekly: "Sedmično"
+            monthly: "Mesečno"
+            never: "Nikad"
+          tree:
+            components: "Komponenti"
+        tooltips:
+          description: "Opis"
+          header: "Header"

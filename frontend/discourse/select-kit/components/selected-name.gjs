@@ -1,0 +1,166 @@
+/* eslint-disable ember/no-classic-components */
+import { tracked } from "@glimmer/tracking";
+import Component from "@ember/component";
+import { fn } from "@ember/helper";
+import { computed, get } from "@ember/object";
+import { guidFor } from "@ember/object/internals";
+import { tagName } from "@ember-decorators/component";
+import { makeArray } from "discourse/lib/helpers";
+import selectKitPropUtils from "discourse/select-kit/lib/select-kit-prop-utils";
+import DButton from "discourse/ui-kit/d-button";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+
+@tagName("")
+@selectKitPropUtils
+export default class SelectedName extends Component {
+  /** @type {string | number | import("@ember/template").TrustedHTML | null | undefined} */
+  name = null;
+
+  /** @type {unknown} */
+  value = null;
+
+  /** @type {string | number | import("@ember/template").TrustedHTML | null | undefined} */
+  headerTitle = null;
+
+  /** @type {string | null | undefined} */
+  headerLang = null;
+
+  /** @type {string | number | import("@ember/template").TrustedHTML | null | undefined} */
+  headerLabel = null;
+
+  /** @type {string | null} */
+  id = null;
+
+  @tracked _langOverride;
+
+  init() {
+    super.init(...arguments);
+
+    this.set("id", guidFor(this));
+  }
+
+  @computed("headerLang")
+  get lang() {
+    if (this._langOverride !== undefined) {
+      return this._langOverride;
+    }
+    return this.headerLang;
+  }
+
+  set lang(value) {
+    this._langOverride = value;
+  }
+
+  @computed("selectKit.options.shouldDisplayIcon")
+  get canDisplayIcon() {
+    return this.selectKit.options.shouldDisplayIcon ?? true;
+  }
+
+  @computed("item", "sanitizedTitle")
+  get ariaLabel() {
+    return this._safeProperty("ariaLabel", this.item) || this.sanitizedTitle;
+  }
+
+  // this might need a more advanced solution
+  // but atm it's the only case we have to handle
+  @computed("title")
+  get sanitizedTitle() {
+    return String(this.title).replace("&hellip;", "");
+  }
+
+  @computed("headerTitle", "item")
+  get title() {
+    return (
+      this.headerTitle ||
+      this._safeProperty("title", this.item) ||
+      this.name ||
+      ""
+    );
+  }
+
+  @computed("headerLabel", "title", "name")
+  get label() {
+    return (
+      this.headerLabel ||
+      this._safeProperty("label", this.item) ||
+      this.title ||
+      this.name
+    );
+  }
+
+  @computed("item.{icon,icons}")
+  get icons() {
+    const _icon = makeArray(this._safeProperty("icon", this.item));
+    const icons = makeArray(this._safeProperty("icons", this.item));
+    return _icon.concat(icons).filter(Boolean);
+  }
+
+  didReceiveAttrs() {
+    super.didReceiveAttrs(...arguments);
+
+    // we can't listen on `item.nameProperty` given it's variable
+    this.setProperties({
+      headerLabel: this.getProperty(this.item, "labelProperty"),
+      headerTitle: this.getProperty(this.item, "titleProperty"),
+      headerLang: this.getProperty(this.item, "langProperty"),
+      name: this.getName(this.item),
+      renderIcon: this.canDisplayIcon,
+      value:
+        this.item === this.selectKit.noneItem ? null : this.getValue(this.item),
+    });
+  }
+
+  _safeProperty(name, content) {
+    if (!content) {
+      return null;
+    }
+
+    return get(content, name);
+  }
+
+  <template>
+    {{#if this.selectKit.options.showFullTitle}}
+      <div
+        class="select-kit-selected-name selected-name choice"
+        data-name={{this.name}}
+        data-value={{this.value}}
+        lang={{this.lang}}
+        title={{this.title}}
+      >
+        {{#if this.selectKit.options.formName}}
+          <input
+            name={{this.selectKit.options.formName}}
+            type="hidden"
+            value={{this.value}}
+          />
+        {{/if}}
+
+        {{#if (and this.renderIcon this.item.icon)}}
+          {{dIcon this.item.icon}}
+        {{/if}}
+
+        <span class="name">
+          {{this.label}}
+        </span>
+
+        {{#if this.shouldDisplayClearableButton}}
+          <DButton
+            class="btn-clear"
+            @action={{fn this.selectKit.deselect this.item}}
+            @ariaLabel="clear_input"
+            @icon="xmark"
+          />
+        {{/if}}
+      </div>
+    {{else}}
+      {{#if this.item.icon}}
+        <div
+          class="select-kit-selected-name selected-name choice"
+          lang={{this.lang}}
+        >
+          {{dIcon this.item.icon}}
+        </div>
+      {{/if}}
+    {{/if}}
+  </template>
+}

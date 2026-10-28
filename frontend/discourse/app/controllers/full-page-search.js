@@ -1,0 +1,794 @@
+/* eslint-disable ember/no-observers */
+import { tracked } from "@glimmer/tracking";
+import Controller, { inject as controller } from "@ember/controller";
+import { action, computed } from "@ember/object";
+import { dependentKeyCompat } from "@ember/object/compat";
+import { schedule } from "@ember/runloop";
+import { service } from "@ember/service";
+import { isEmpty } from "@ember/utils";
+import { observes } from "@ember-decorators/object";
+import { Promise } from "rsvp";
+import { ajax } from "discourse/lib/ajax";
+import { addUniqueValuesToArray } from "discourse/lib/array-tools";
+import { search as searchCategoryTag } from "discourse/lib/category-tag-search";
+import { bind } from "discourse/lib/decorators";
+import { setTransient } from "discourse/lib/page-tracker";
+import PostBulkSelectHelper from "discourse/lib/post-bulk-select-helper";
+import { scrollTop } from "discourse/lib/scroll-top";
+import {
+  getSearchKey,
+  isValidSearchTerm,
+  logSearchLinkClick,
+  reciprocallyRankedList,
+  searchContextDescription,
+  searchTermScopesToPMs,
+  translateResults,
+  updateRecentSearches,
+} from "discourse/lib/search";
+import {
+  applyBehaviorTransformer,
+  applyValueTransformer,
+} from "discourse/lib/transformer";
+import userSearch from "discourse/lib/user-search";
+import { escapeExpression } from "discourse/lib/utilities";
+import Category from "discourse/models/category";
+import { i18n } from "discourse-i18n";
+
+export const SEARCH_TYPE_DEFAULT = "topics_posts";
+export const SEARCH_TYPE_CATS_TAGS = "categories_tags";
+export const SEARCH_TYPE_USERS = "users";
+
+const PAGE_LIMIT = 10;
+
+const customSearchTypes = [];
+
+export function registerFullPageSearchType(
+  translationKey,
+  searchTypeId,
+  searchFunc,
+  options = {}
+) {
+  const searchType = {
+    translationKey,
+    searchTypeId,
+    searchFunc,
+    after: options.after,
+  };
+  // Keyed by id rather than appended: this registry outlives any one
+  // application, so registering again — a second boot, a reload — must replace
+  // what is there instead of listing the type twice.
+  const existing = customSearchTypes.findIndex(
+    (type) => type.searchTypeId === searchTypeId
+  );
+
+  if (existing === -1) {
+    customSearchTypes.push(searchType);
+  } else {
+    customSearchTypes[existing] = searchType;
+  }
+}
+
+export default class FullPageSearchController extends Controller {
+  @service composer;
+
+  @service appEvents;
+
+  @service siteSettings;
+
+  @service searchPreferencesManager;
+
+  @service currentUser;
+
+  @controller application;
+
+  @tracked searching = false;
+  @tracked loading = false;
+
+  /** @type {boolean | null} */
+  bulkSelectEnabled = null;
+
+  queryParams = [
+    "q",
+    "expanded",
+    "context_id",
+    "context",
+    "skip_context",
+    "search_type",
+  ];
+
+  q;
+
+  /** @type {string | number | null} */
+  context_id = null;
+  search_type = SEARCH_TYPE_DEFAULT;
+
+  /** @type {string | null} */
+  context = null;
+  sortOrder = 0;
+
+  /** @type {{ name: string, id: number, term?: string, alias?: string }[] | null} */
+  sortOrders = null;
+  invalidSearch = false;
+  page = 1;
+
+  /** @type {number | null} */
+  resultCount = null;
+  additionalSearchResults = [];
+
+  /** @type {string | null | undefined} */
+  error = null;
+  #syncedQ;
+  _searchOnSortChange = true;
+
+  init() {
+    super.init(...arguments);
+
+    this.set(
+      "sortOrder",
+      this.searchPreferencesManager.sortOrder ||
+        this.siteSettings.search_default_sort_order
+    );
+
+    this.sortOrders = [
+      { name: i18n("search.relevance"), id: 0 },
+      {
+        name: i18n("search.latest_post"),
+        id: 1,
+        term: "order:latest",
+        alias: "l",
+      },
+      { name: i18n("search.most_liked"), id: 2, term: "order:likes" },
+      { name: i18n("search.most_viewed"), id: 3, term: "order:views" },
+      {
+        name: i18n("search.latest_topic"),
+        id: 4,
+        term: "order:latest_topic",
+      },
+    ];
+
+    if (this.currentUser) {
+      this.sortOrders.push({
+        name: i18n("search.last_read"),
+        id: 5,
+        term: "order:read",
+        alias: "r",
+      });
+    }
+
+    this.bulkSelectHelper = new PostBulkSelectHelper(this);
+  }
+
+  @computed("skip_context", "context")
+  get searchContextEnabled() {
+    return (
+      (!this.skip_context && this.context) || this.skip_context === "false"
+    );
+  }
+
+  set searchContextEnabled(val) {
+    this.set("skip_context", !val);
+  }
+
+  @computed("bulkSelectHelper.selected.length")
+  get hasSelection() {
+    return this.bulkSelectHelper?.selected?.length > 0;
+  }
+
+  @dependentKeyCompat
+  get searchButtonDisabled() {
+    return this.searching || this.loading;
+  }
+
+  @computed("resultCount")
+  get hasResults() {
+    return (this.resultCount || 0) > 0;
+  }
+
+  // Read rather than captured at construction: a type can be registered by a
+  // bundle that loads after this controller exists, and a list built once in
+  // `init` would have been fixed before that registration happened.
+  get searchTypes() {
+    const searchTypes = [
+      { name: i18n("search.type.default"), id: SEARCH_TYPE_DEFAULT },
+      {
+        name: this.siteSettings.tagging_enabled
+          ? i18n("search.type.categories_and_tags")
+          : i18n("search.type.categories"),
+        id: SEARCH_TYPE_CATS_TAGS,
+      },
+      { name: i18n("search.type.users"), id: SEARCH_TYPE_USERS },
+    ];
+
+    customSearchTypes.forEach((type) => {
+      const searchType = {
+        name: i18n(type.translationKey),
+        id: type.searchTypeId,
+      };
+      // `after` names the type to follow rather than an index, so a type keeps
+      // its place even as the built-in ones change around it
+      const follows = type.after
+        ? searchTypes.findIndex(({ id }) => id === type.after)
+        : -1;
+
+      if (follows === -1) {
+        searchTypes.push(searchType);
+      } else {
+        searchTypes.splice(follows + 1, 0, searchType);
+      }
+    });
+
+    return applyValueTransformer("full-page-search-types", searchTypes);
+  }
+
+  @computed("search_type")
+  get searchButtonIcon() {
+    return applyValueTransformer(
+      "full-page-search-button-icon",
+      "magnifying-glass",
+      { searchType: this.search_type }
+    );
+  }
+
+  @computed("search_type")
+  get searchButtonLabel() {
+    return applyValueTransformer(
+      "full-page-search-button-label",
+      "search.search_button",
+      { searchType: this.search_type }
+    );
+  }
+
+  @computed("hasResults", "searchActive", "search_type")
+  get showNoResults() {
+    return applyValueTransformer(
+      "full-page-search-no-results-enabled",
+      !this.hasResults && this.searchActive,
+      { searchType: this.search_type }
+    );
+  }
+
+  @computed("expanded")
+  get expandFilters() {
+    return this.expanded === "true";
+  }
+
+  @computed("q")
+  get hasAutofocus() {
+    return isEmpty(this.q);
+  }
+
+  @computed("q")
+  get highlightQuery() {
+    if (!this.q) {
+      return;
+    }
+    return this.q
+      .split(/\s+/)
+      .filter((t) => t !== "l")
+      .join(" ");
+  }
+
+  @computed("context", "context_id")
+  get searchContextDescription() {
+    let name = this.context_id;
+    if (this.context === "category") {
+      let category = Category.findById(this.context_id);
+      if (!category) {
+        return;
+      }
+
+      name = category.get("name");
+    }
+    return searchContextDescription(this.context, name);
+  }
+
+  @computed("q")
+  get searchActive() {
+    return isValidSearchTerm(this.q, this.siteSettings);
+  }
+
+  @computed("q")
+  get noSortQ() {
+    const q = this.cleanTerm(this.q);
+    return escapeExpression(q);
+  }
+
+  @computed("canCreateTopic", "siteSettings.login_required")
+  get showSuggestion() {
+    return this.canCreateTopic || !this.siteSettings?.login_required;
+  }
+
+  @computed("q")
+  get showLikeCount() {
+    return this.q?.includes("order:likes");
+  }
+
+  @computed("q")
+  get isPrivateMessage() {
+    return (
+      this.q &&
+      this.currentUser &&
+      (this.q.includes("in:messages") ||
+        this.q.includes("in:personal") ||
+        this.q.includes(
+          `personal_messages:${this.currentUser.get("username_lower")}`
+        ))
+    );
+  }
+
+  @computed("q")
+  get isPMOnly() {
+    return searchTermScopesToPMs(this.q);
+  }
+
+  @computed("resultCount", "noSortQ")
+  get resultCountLabel() {
+    const plus = this.resultCount % 50 === 0 ? "+" : "";
+    return i18n("search.result_count", {
+      count: this.resultCount,
+      plus,
+      term: this.noSortQ,
+    });
+  }
+
+  @computed("hasResults")
+  get canBulkSelect() {
+    return this.currentUser && this.currentUser.staff && this.hasResults;
+  }
+
+  @computed("bulkSelectHelper.selected.length", "searchResultPosts.length")
+  get hasUnselectedResults() {
+    return (
+      this.bulkSelectHelper?.selected?.length < this.searchResultPosts?.length
+    );
+  }
+
+  @computed("model.grouped_search_result.can_create_topic")
+  get canCreateTopic() {
+    return (
+      this.currentUser && this.model?.grouped_search_result?.can_create_topic
+    );
+  }
+
+  @computed("page")
+  get isLastPage() {
+    return this.page === PAGE_LIMIT;
+  }
+
+  @computed("search_type")
+  get usingDefaultSearchType() {
+    return (
+      ![SEARCH_TYPE_CATS_TAGS, SEARCH_TYPE_USERS].includes(this.search_type) &&
+      !this.customSearchType
+    );
+  }
+
+  @computed("search_type")
+  get activeSearchType() {
+    return this.usingDefaultSearchType ? SEARCH_TYPE_DEFAULT : this.search_type;
+  }
+
+  @computed("search_type")
+  get customSearchType() {
+    return customSearchTypes.find(
+      (type) => this.search_type === type["searchTypeId"]
+    );
+  }
+
+  @computed("bulkSelectEnabled")
+  get searchInfoClassNames() {
+    return this.bulkSelectEnabled
+      ? "search-info bulk-select-visible"
+      : "search-info";
+  }
+
+  @computed(
+    "model.posts",
+    "additionalSearchResults",
+    "usingDefaultSearchType",
+    "customSearchType"
+  )
+  get searchResultPosts() {
+    if (!this.usingDefaultSearchType && !this.customSearchType) {
+      return [];
+    }
+
+    if (this.additionalSearchResults?.list?.length > 0) {
+      // a search type that renders its own results need not produce posts at
+      // all, and ranking against a list that is not there throws
+      return reciprocallyRankedList(
+        [this.model?.posts ?? [], this.additionalSearchResults.list],
+        ["topic_id", this.additionalSearchResults.identifier]
+      );
+    } else {
+      return this.model?.posts;
+    }
+  }
+
+  get canLoadMore() {
+    return (
+      this.get("model.grouped_search_result.more_full_page_results") &&
+      !this.loading &&
+      this.page < PAGE_LIMIT
+    );
+  }
+
+  setSearchTerm(term) {
+    this.#syncedQ = term;
+    this._searchOnSortChange = false;
+    term = this.cleanTerm(term);
+    this._searchOnSortChange = true;
+    this.set("searchTerm", term);
+  }
+
+  cleanTerm(term) {
+    if (term) {
+      this.sortOrders.forEach((order) => {
+        if (order.term) {
+          let word = order.term;
+          let matches = term.match(new RegExp(`(^|\\s)${word}($|\\s)`));
+          if (!matches && order.alias) {
+            word = order.alias;
+            matches = term.match(new RegExp(`(^|\\s)${word}($|\\s)`));
+          }
+          if (matches) {
+            this.set("sortOrder", order.id);
+            term = term.replace(
+              new RegExp(`(^|\\s)${word}($|\\s)`, "g"),
+              "$1$2"
+            );
+            term = term.trim();
+          }
+        }
+      });
+    }
+    return term;
+  }
+
+  @observes("sortOrder")
+  triggerSearch() {
+    if (this._searchOnSortChange) {
+      this.set("page", 1);
+      this._search();
+    }
+  }
+
+  @observes("search_type")
+  triggerSearchOnTypeChange() {
+    // Runs before the `q` observer, so a URL change to both would otherwise
+    // search with the previous term.
+    if (this.q !== this.#syncedQ) {
+      this.setSearchTerm(this.q);
+    }
+
+    if (this.searchActive) {
+      this.set("page", 1);
+      this._search();
+    }
+  }
+
+  @observes("model")
+  modelChanged() {
+    if (this.searchTerm !== this.q) {
+      this.setSearchTerm(this.q);
+    }
+  }
+
+  @observes("q")
+  qChanged() {
+    const model = this.model;
+    if (model && this.get("model.q") !== this.q) {
+      this.setSearchTerm(this.q);
+      this.send("search");
+    } else {
+      this.#syncedQ = this.q;
+    }
+  }
+
+  @observes("model.{posts,categories,tags,users}.length", "searchResultPosts")
+  resultCountChanged() {
+    if (!this.model.posts) {
+      return 0;
+    }
+
+    this.set(
+      "resultCount",
+      this.searchResultPosts.length +
+        this.model.categories.length +
+        this.model.tags.length +
+        this.model.users.length
+    );
+  }
+
+  reset() {
+    this.setProperties({
+      searching: false,
+      page: 1,
+      resultCount: null,
+    });
+    this.bulkSelectHelper.clearAll();
+  }
+
+  @action
+  afterBulkActionComplete() {
+    return Promise.resolve(this._search());
+  }
+
+  @action
+  createTopic(event) {
+    event?.preventDefault();
+    this.composer.openNewTopic();
+  }
+
+  @action
+  clearSearchTerm(event) {
+    event?.preventDefault();
+    this.set("searchTerm", "");
+
+    schedule("afterRender", () => {
+      if (this.isDestroying) {
+        return;
+      }
+
+      document.querySelector("input.search-query")?.focus();
+    });
+  }
+
+  @action
+  setSearchType(searchType) {
+    this.set("search_type", searchType);
+
+    // With nothing typed yet, picking a type is the start of a search rather
+    // than a change to one, so the caret goes where the term is typed. A term
+    // already in the field means the choice was the point, and taking focus
+    // away from it would be an interruption.
+    if (this.searchTerm?.trim()) {
+      return;
+    }
+
+    schedule("afterRender", () => {
+      if (this.isDestroying) {
+        return;
+      }
+
+      document.querySelector("input.search-query")?.focus();
+    });
+  }
+
+  @action
+  addSearchResults(list, identifier) {
+    this.set("additionalSearchResults", {
+      list,
+      identifier,
+    });
+  }
+
+  @action
+  setSortOrder(value) {
+    this.set("sortOrder", value);
+    this.searchPreferencesManager.sortOrder = value;
+  }
+
+  @action
+  selectAll() {
+    addUniqueValuesToArray(
+      this.bulkSelectHelper.selected,
+      this.searchResultPosts.map((item) => item)
+    );
+
+    // Doing this the proper way is a HUGE pain,
+    // we can hack this to work by observing each on the array
+    // in the component, however, when we select ANYTHING, we would force
+    // 50 traversals of the list
+    // This hack is cheap and easy
+    document
+      .querySelectorAll(".fps-result input[type=checkbox]")
+      .forEach((checkbox) => {
+        checkbox.checked = true;
+      });
+  }
+
+  @action
+  clearAll() {
+    this.bulkSelectHelper.clearAll();
+
+    document
+      .querySelectorAll(".fps-result input[type=checkbox]")
+      .forEach((checkbox) => {
+        checkbox.checked = false;
+      });
+  }
+
+  @action
+  toggleBulkSelect() {
+    this.toggleProperty("bulkSelectEnabled");
+    this.bulkSelectHelper.clearAll();
+  }
+
+  @action
+  search(options = {}) {
+    if (this.searching) {
+      return;
+    }
+
+    if (options.collapseFilters) {
+      this.appEvents.trigger("full-page-search:collapse-filters");
+    }
+    this.set("page", 1);
+
+    this.appEvents.trigger("full-page-search:trigger-search");
+
+    this._search();
+  }
+
+  @action
+  loadMore() {
+    if (!this.canLoadMore) {
+      return;
+    }
+
+    applyBehaviorTransformer("full-page-search-load-more", () => {
+      this.incrementProperty("page");
+      this._search();
+    });
+  }
+
+  @action
+  logClick(topicId) {
+    if (this.get("model.grouped_search_result.search_log_id") && topicId) {
+      logSearchLinkClick({
+        searchLogId: this.get("model.grouped_search_result.search_log_id"),
+        searchResultId: topicId,
+        searchResultType: "topic",
+      });
+    }
+  }
+
+  @bind
+  _search() {
+    if (this.searching) {
+      return;
+    }
+
+    this.set("invalidSearch", false);
+    const searchTerm = this.searchTerm;
+    // A non-zero sortOrder means user selected an order filter, which is valid even without a search term
+    const hasValidSortOrder = this.sortOrder > 0;
+    if (
+      !hasValidSortOrder &&
+      !isValidSearchTerm(searchTerm, this.siteSettings)
+    ) {
+      this.set("invalidSearch", true);
+      return;
+    }
+
+    let args = { q: searchTerm, page: this.page };
+
+    if (args.page === 1) {
+      this.set("bulkSelectEnabled", false);
+
+      this.bulkSelectHelper.clearAll();
+      this.set("searching", true);
+      scrollTop();
+    } else {
+      this.set("loading", true);
+    }
+
+    const sortOrder = this.sortOrder;
+    if (sortOrder && this.sortOrders[sortOrder].term) {
+      args.q += " " + this.sortOrders[sortOrder].term;
+    }
+
+    this.set("q", args.q);
+
+    const skip = this.skip_context;
+    if ((!skip && this.context) || skip === "false") {
+      args.search_context = {
+        type: this.context,
+        id: this.context_id,
+      };
+    }
+
+    const searchKey = getSearchKey(args);
+
+    if (this.customSearchType) {
+      const customSearch = this.customSearchType["searchFunc"];
+      customSearch(this, args, searchKey);
+      return;
+    }
+
+    switch (this.search_type) {
+      case SEARCH_TYPE_CATS_TAGS:
+        const categoryTagSearch = searchCategoryTag(
+          searchTerm,
+          this.siteSettings
+        );
+        Promise.resolve(categoryTagSearch)
+          .then(async (results) => {
+            const categories = results.filter((c) => Boolean(c.model));
+            const tags = results.filter((c) => !c.model);
+            const model = (await translateResults({ categories, tags })) || {};
+            this.set("model", model);
+          })
+          .finally(() => {
+            this.setProperties({
+              searching: false,
+              loading: false,
+            });
+          });
+        break;
+      case SEARCH_TYPE_USERS:
+        userSearch({ term: searchTerm, limit: 20 })
+          .then(async (results) => {
+            const model = (await translateResults({ users: results })) || {};
+            this.set("model", model);
+          })
+          .finally(() => {
+            this.setProperties({
+              searching: false,
+              loading: false,
+            });
+          });
+        break;
+      default:
+        if (this.currentUser) {
+          updateRecentSearches(this.currentUser, searchTerm);
+        }
+        const sessionId = document.querySelector(
+          "meta[name=discourse-track-view-session-id]"
+        )?.content;
+
+        ajax("/search", {
+          data: args,
+          headers: sessionId
+            ? { "Discourse-Pageview-Session-Id": sessionId }
+            : {},
+        })
+          .then(async (results) => {
+            const model = (await translateResults(results)) || {};
+
+            if (results.grouped_search_result) {
+              this.set("q", results.grouped_search_result.term);
+            }
+
+            if (args.page > 1) {
+              if (model) {
+                this.model.set("posts", this.model.posts.concat(model.posts));
+                this.model.set(
+                  "topics",
+                  this.model.topics.concat(model.topics)
+                );
+                this.model.set(
+                  "grouped_search_result",
+                  results.grouped_search_result
+                );
+              }
+            } else {
+              setTransient("lastSearch", { searchKey, model }, 5);
+              model.grouped_search_result = results.grouped_search_result;
+              this.set("model", model);
+            }
+            this.set("error", null);
+          })
+          .catch((e) => {
+            this.set("error", e.jqXHR.responseJSON?.message);
+          })
+          .finally(() => {
+            this.setProperties({
+              searching: false,
+              loading: false,
+            });
+            this.appEvents.trigger("search:search_result_view", {
+              page: args.page,
+            });
+          });
+        break;
+    }
+  }
+
+  _afterTransition() {
+    if (Object.keys(this.model).length === 0) {
+      this.reset();
+    }
+  }
+}

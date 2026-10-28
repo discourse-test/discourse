@@ -1,0 +1,75 @@
+import Component from "@glimmer/component";
+import { Textarea } from "@ember/component";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { schedule } from "@ember/runloop";
+import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
+import { resettableTracked } from "discourse/lib/tracked-tools";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+
+export default class FormTemplateFieldTextarea extends Component {
+  @service appEvents;
+
+  @resettableTracked value = this.args.value || "";
+
+  constructor() {
+    super(...arguments);
+    this.appEvents.on("composer:replace-text", this, this.handleReplaceText);
+  }
+
+  willDestroy() {
+    super.willDestroy(...arguments);
+    this.appEvents.off("composer:replace-text", this, this.handleReplaceText);
+  }
+
+  @action
+  handleReplaceText(oldVal, newVal) {
+    if (!this.value?.includes(oldVal)) {
+      return;
+    }
+
+    this.value = this.value.replace(oldVal, newVal ?? "");
+
+    schedule("afterRender", () => {
+      this.args.onChange?.();
+    });
+  }
+
+  @action
+  onInput(event) {
+    this.value = event.target.value;
+    this.args.onChange?.(event);
+  }
+
+  <template>
+    <div class="control-group form-template-field" data-field-type="textarea">
+      {{#if @attributes.label}}
+        <label class="form-template-field__label">
+          {{@attributes.label}}
+          {{#if @validations.required}}
+            {{dIcon "asterisk" class="form-template-field__required-indicator"}}
+          {{/if}}
+        </label>
+      {{/if}}
+
+      {{#if @attributes.description}}
+        <span class="form-template-field__description">
+          {{trustHTML @attributes.description}}
+        </span>
+      {{/if}}
+
+      <Textarea
+        class="form-template-field__textarea"
+        maxlength={{@validations.maximum}}
+        minlength={{@validations.minimum}}
+        name={{@id}}
+        pattern={{@validations.pattern}}
+        placeholder={{@attributes.placeholder}}
+        required={{if @validations.required "required" ""}}
+        @value={{this.value}}
+        {{on "input" this.onInput}}
+      />
+    </div>
+  </template>
+}

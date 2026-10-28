@@ -1,0 +1,42 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "upload_id": {
+      "type": "integer"
+    },
+    "associated_account_id": {
+      "type": "integer"
+    },
+    "type": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "type"
+  ],
+  "oneOf": [
+    {
+      "properties": {
+        "type": {
+          "enum": ["uploaded", "custom", "gravatar", "current"]
+        }
+      },
+      "required": ["upload_id"]
+    },
+    {
+      "properties": {
+        "type": {
+          "enum": ["associated_account"]
+        }
+      },
+      "required": ["associated_account_id"]
+    },
+    {
+      "properties": {
+        "type": {
+          "enum": ["system"]
+        }
+      }
+    }
+  ]
+}

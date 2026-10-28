@@ -1,0 +1,61 @@
+# frozen_string_literal: true
+
+describe "User AI preferences" do
+  fab!(:user) { Fabricate(:admin, refresh_auto_groups: true) }
+  fab!(:llm_model)
+  let(:user_preferences_ai_page) { PageObjects::Pages::UserPreferencesAi.new }
+
+  fab!(:discovery_agent) { Fabricate(:ai_agent, allowed_group_ids: [Group::AUTO_GROUPS[:admins]]) }
+
+  before do
+    enable_current_plugin
+    SiteSetting.ai_discover_agent = discovery_agent.id
+    SiteSetting.ai_embeddings_enabled = true
+    SiteSetting.ai_embeddings_semantic_search_enabled = true
+    Group.find_by(id: Group::AUTO_GROUPS[:admins]).add(user)
+    assign_fake_provider_to(:ai_default_llm_model)
+    sign_in(user)
+  end
+
+  describe "search discoveries setting" do
+    context "when discoveries are enabled" do
+      before { enable_legacy_discover }
+
+      it "shows the setting on the user preferences page" do
+        user_preferences_ai_page.visit(user)
+        expect(user_preferences_ai_page).to have_ai_preference("pref-ai-search-discoveries")
+      end
+
+      it "saves the setting when toggled" do
+        user.user_option.update!(ai_search_discoveries: true)
+        user_preferences_ai_page.visit(user)
+
+        expect(user_preferences_ai_page).to have_ai_preference_checked("pref-ai-search-discoveries")
+
+        user_preferences_ai_page.toggle_setting("pref-ai-search-discoveries")
+        user_preferences_ai_page.save_changes
+
+        expect(page).to have_content(I18n.t("js.saved"))
+        expect(user.user_option.reload.ai_search_discoveries).to eq(false)
+      end
+
+      context "when the user can't use agents" do
+        it "doesn't render the option in the preferences page" do
+          Group.find_by(id: Group::AUTO_GROUPS[:admins]).remove(user)
+
+          user_preferences_ai_page.visit(user)
+          expect(user_preferences_ai_page).to have_no_ai_preference("pref-ai-search-discoveries")
+        end
+      end
+    end
+
+    context "when discoveries are disabled" do
+      before { SiteSetting.ai_discover_enabled = false }
+
+      it "hides the setting from the user preferences page" do
+        user_preferences_ai_page.visit(user)
+        expect(user_preferences_ai_page).to have_no_ai_preference("pref-ai-search-discoveries")
+      end
+    end
+  end
+end

@@ -1,0 +1,71 @@
+import { cached } from "@glimmer/tracking";
+import { service } from "@ember/service";
+import { findActiveLink } from "discourse/lib/sidebar/active-link";
+import { applyValueTransformer } from "discourse/lib/transformer";
+import Category from "discourse/models/category";
+import { i18n } from "discourse-i18n";
+import AllCategoriesSectionLink from "../common/all-categories-section-link.gjs";
+import SidebarCommonCategoriesSection from "../common/categories-section.gjs";
+import Section from "../section.gjs";
+import SectionLink from "../section-link.gjs";
+
+export default class SidebarAnonymousCategoriesSection extends SidebarCommonCategoriesSection {
+  @service router;
+
+  shouldSortCategoriesByDefault = this.#defaultCategoryIds().length > 0;
+
+  @cached
+  get activeLink() {
+    return findActiveLink(this.sectionLinks, this.router);
+  }
+
+  get categories() {
+    const ids = this.#defaultCategoryIds();
+    if (ids.length) {
+      return Category.findByIds(ids);
+    }
+    return this.topSiteCategories;
+  }
+
+  #defaultCategoryIds() {
+    const raw = this.siteSettings.default_navigation_menu_categories;
+    const initial = raw ? raw.split("|").map((id) => parseInt(id, 10)) : [];
+
+    return applyValueTransformer(
+      "sidebar-anonymous-default-categories",
+      initial
+    );
+  }
+
+  <template>
+    <Section
+      @activeLink={{this.activeLink}}
+      @collapsable={{@collapsable}}
+      @expandWhenActive={{@expandActiveSection}}
+      @headerLinkText={{i18n "sidebar.sections.categories.header_link_text"}}
+      @sectionName="categories"
+    >
+      {{#each this.sectionLinks as |sectionLink|}}
+        <SectionLink
+          data-category-id={{sectionLink.category.id}}
+          @content={{sectionLink.text}}
+          @currentWhen={{sectionLink.currentWhen}}
+          @model={{sectionLink.model}}
+          @prefixColor={{sectionLink.prefixColor}}
+          @prefixType={{sectionLink.prefixType}}
+          @prefixValue={{sectionLink.prefixValue}}
+          @route={{sectionLink.route}}
+          @scrollIntoView={{and
+            @scrollActiveLinkIntoView
+            (eq sectionLink.name this.activeLink.name)
+          }}
+          @title={{sectionLink.title}}
+        />
+      {{/each}}
+
+      <AllCategoriesSectionLink
+        @scrollActiveLinkIntoView={{@scrollActiveLinkIntoView}}
+      />
+    </Section>
+  </template>
+}

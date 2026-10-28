@@ -1,0 +1,98 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+nb_NO:
+  reports:
+    overall_sentiment:
+      yaxis: "Dato"
+  discourse_ai:
+    tools:
+      presets:
+        image_generation_custom:
+          name: "Egendefinert"
+    ai_bot:
+      navigation:
+        users:
+          title: "Brukere"
+        groups:
+          title: "Grupper"
+        review:
+          title: "Gjennomgangskø"
+        categories:
+          title: "Kategorier"
+        tags:
+          title: "Stikkord"
+        themes:
+          title: "Drakter"
+        backups:
+          title: "Sikkerhetskopier"
+      read_post:
+        unknown_post: "innlegg"
+      chat_tool_approval:
+        topic_states:
+          open: "Åpne"
+          closed: "Lukket"
+          active: "Aktiv"
+          deleted: "Slettet"
+        solution_post: "Innlegg #%{number}"
+        duration_label: "Varighet:"
+        user_duration:
+          one: "%{count} dag"
+          other: "%{count} dager"
+        posts_label: "Innlegg"
+        category_label: "Kategori"
+        category_fields:
+          name: "navn"
+          description: "beskrivelse"
+          color: "farge"
+        approve_label: "Ja"
+        reject_label: "Nei"
+      tool_summary:
+        search: "Søk"
+        time: "Tid"
+        summarize: "Oppsummer"
+      tool_help:
+        create_category: "Opprett en ny kategori"
+      close_topic:
+        errors:
+          not_found: "Fant ikke emnet."
+      unlist_topic:
+        errors:
+          not_found: "Fant ikke emnet."
+      delete_topic:
+        errors:
+          not_found: "Fant ikke emnet."
+      change_topic_tags:
+        errors:
+          not_found: "Fant ikke emnet."
+      edit_category:
+        errors:
+          not_found: "Kategorien finnes ikke."
+      change_topic_category:
+        errors:
+          not_found: "Fant ikke emnet."
+          category_not_found: "Kategorien finnes ikke."
+      set_topic_timer:
+        errors:
+          not_found: "Fant ikke emnet."
+      set_slow_mode:
+        errors:
+          not_found: "Fant ikke emnet."
+      move_posts:
+        errors:
+          not_found: "Fant ikke emnet."
+      assign:
+        errors:
+          not_found: "Fant ikke emnet."
+    reviewables:
+      ai_tool_action:
+        approve:
+          title: "Godkjenn"
+        reject:
+          title: "Avvis"
+    ai_staff_action_logger:
+      updated: "oppdatert"
+      removed: "fjernet"

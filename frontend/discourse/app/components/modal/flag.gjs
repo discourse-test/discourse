@@ -1,0 +1,406 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { fn } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
+import FlagActionType from "discourse/components/flag-action-type";
+import ReportIllegalContentModal from "discourse/components/modal/report-illegal-content";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import ReviewableBundledAction from "discourse/components/reviewable-bundled-action";
+import lazyHash from "discourse/helpers/lazy-hash";
+import { reload } from "discourse/helpers/page-reloader";
+import { getAbsoluteURL } from "discourse/lib/get-url";
+import { MAX_MESSAGE_LENGTH } from "discourse/models/post-action-type";
+import User from "discourse/models/user";
+import DButton from "discourse/ui-kit/d-button";
+import DModal from "discourse/ui-kit/d-modal";
+import { i18n } from "discourse-i18n";
+
+function reportingChoices(flags, includeIllegalReport) {
+  const choices = flags.map((flag) => ({ kind: "flag", flag }));
+  if (includeIllegalReport) {
+    const index = choices.findIndex(
+      ({ flag }) => flag.name_key === "notify_moderators"
+    );
+    choices.splice(index < 0 ? choices.length : index, 0, { kind: "dsa" });
+  }
+  return choices;
+}
+
+export default class Flag extends Component {
+  @service adminTools;
+  @service currentUser;
+  @service siteSettings;
+  @service appEvents;
+  @service modal;
+  // eslint-disable-next-line discourse/no-unused-services
+  @service site; // FIXME: used by flag-target objects
+
+  @tracked selected;
+  @tracked message;
+  @tracked isConfirmed = false;
+  @tracked spammerDetails;
+  @tracked dsaSelected = false;
+
+  constructor() {
+    super(...arguments);
+
+    this.adminTools
+      ?.checkSpammer(this.args.model.flagModel.user_id)
+      .then((result) => (this.spammerDetails = result));
+
+    if (this.flagsAvailable.length === 1 && !this.canReportIllegalContent) {
+      this.selected = this.flagsAvailable[0];
+    }
+  }
+
+  get flagActions() {
+    return {
+      icon: "gavel",
+      label: i18n("flagging.take_action"),
+      actions: [
+        {
+          action_name: "agree_and_hide",
+          icon: "thumbs-up",
+          label: i18n("flagging.take_action_options.default.title"),
+          description: i18n("flagging.take_action_options.default.details"),
+        },
+        {
+          action_name: "agree_and_suspend",
+          icon: "ban",
+          label: i18n("flagging.take_action_options.suspend.title"),
+          description: i18n("flagging.take_action_options.suspend.details"),
+          client_action: "suspend",
+        },
+        {
+          action_name: "agree_and_silence",
+          icon: "microphone-slash",
+          label: i18n("flagging.take_action_options.silence.title"),
+          description: i18n("flagging.take_action_options.silence.details"),
+          client_action: "silence",
+        },
+      ],
+    };
+  }
+
+  get canSendWarning() {
+    return (
+      !this.args.model.flagTarget.targetsTopic() &&
+      this.currentUser.staff &&
+      this.selected?.name_key === "notify_user"
+    );
+  }
+
+  get canReportIllegalContent() {
+    return (
+      this.siteSettings.dsa_reporting_enabled &&
+      this.args.model.allowIllegalContentReport === true
+    );
+  }
+
+  get contentUrl() {
+    const content = this.args.model.flagModel;
+    const url = content.urlWithNumber || content.url;
+    return url ? getAbsoluteURL(url) : "";
+  }
+
+  get showDeleteSpammer() {
+    return this.spammerDetails?.canDelete && this.selected?.name_key === "spam";
+  }
+
+  get submitLabel() {
+    if (this.selected?.require_message) {
+      return this.args.model.flagTarget.customSubmitLabel();
+    }
+
+    return this.args.model.flagTarget.submitLabel();
+  }
+
+  get title() {
+    return this.args.model.flagTarget.title();
+  }
+
+  get flagsAvailable() {
+    return this.args.model.flagTarget
+      .flagsAvailable(this)
+      .filter((flag) => flag.enabled);
+  }
+
+  get staffFlagsAvailable() {
+    return this.flagsAvailable.length > 1 || this.canReportIllegalContent;
+  }
+
+  get submitEnabled() {
+    if (!this.selected) {
+      return false;
+    }
+
+    if (!this.selected.require_message) {
+      return true;
+    }
+
+    if (this.selected.isIllegal && !this.isConfirmed) {
+      return false;
+    }
+
+    const len = this.message?.length || 0;
+    return (
+      len >= this.siteSettings.min_personal_message_post_length &&
+      len <= MAX_MESSAGE_LENGTH
+    );
+  }
+
+  get canTakeAction() {
+    return (
+      !this.args.model.flagTarget.targetsTopic() &&
+      !this.selected?.require_message &&
+      this.currentUser.staff
+    );
+  }
+
+  @action
+  onKeydown(event) {
+    if (
+      this.dsaSelected &&
+      event.key === "Enter" &&
+      (event.ctrlKey || event.metaKey)
+    ) {
+      event.preventDefault();
+      this.reportIllegalContent();
+      return false;
+    }
+
+    if (
+      this.submitEnabled &&
+      event.key === "Enter" &&
+      (event.ctrlKey || event.metaKey)
+    ) {
+      this.createFlag();
+      return false;
+    }
+  }
+
+  @action
+  async penalize(adminToolMethod, performAction) {
+    if (!this.adminTools) {
+      return;
+    }
+
+    const createdBy = await User.findByUsername(
+      this.args.model.flagModel.username
+    );
+    const opts = { before: performAction };
+
+    if (this.args.model.flagTarget.editable()) {
+      opts.postId = this.args.model.flagModel.id;
+      opts.postEdit = this.args.model.flagModel.cooked;
+    }
+
+    return this.adminTools[adminToolMethod](createdBy, opts);
+  }
+
+  @action
+  async deleteSpammer() {
+    if (this.spammerDetails) {
+      await this.spammerDetails.deleteUser();
+      reload();
+    }
+  }
+
+  @action
+  async takeAction(actionable) {
+    if (actionable.client_action === "suspend") {
+      await this.penalize("showSuspendModal", () =>
+        this.createFlag({ takeAction: true, skipClose: true })
+      );
+    } else if (actionable.client_action === "silence") {
+      await this.penalize("showSilenceModal", () =>
+        this.createFlag({ takeAction: true, skipClose: true })
+      );
+    } else if (actionable.client_action) {
+      // eslint-disable-next-line no-console
+      console.error(`No handler for ${actionable.client_action} found`);
+    } else {
+      await this.#createFlagAndHide({ takeAction: true });
+    }
+  }
+
+  @action
+  createFlag(opts = {}) {
+    if (this.selected.require_message) {
+      opts.message = this.message;
+    }
+    const created = this.args.model.flagTarget.create(this, opts);
+    this.appEvents.trigger("flag:created", {
+      message: opts.message,
+      postId: this.args.model.flagModel.id,
+    });
+    return created;
+  }
+
+  @action
+  createFlagAsWarning() {
+    return this.#createFlagAndHide({ isWarning: true });
+  }
+
+  @action
+  flagForReview() {
+    return this.#createFlagAndHide({ queue_for_review: true });
+  }
+
+  @action
+  changePostActionType(actionType) {
+    this.selected = actionType;
+    this.dsaSelected = false;
+  }
+
+  @action
+  selectIllegalReport() {
+    this.selected = null;
+    this.dsaSelected = true;
+  }
+
+  @action
+  reportIllegalContent() {
+    const model = this.args.model;
+    this.modal.show(ReportIllegalContentModal, {
+      model: {
+        contentUrl: this.contentUrl,
+        onBack: () => this.modal.show(Flag, { model }),
+      },
+    });
+  }
+
+  async #createFlagAndHide(opts) {
+    // Only an explicit `false` means the flag failed: custom flag targets may resolve nothing.
+    if ((await this.createFlag(opts)) !== false) {
+      this.args.model.setHidden();
+    }
+  }
+
+  <template>
+    <DModal
+      class="flag-modal"
+      @bodyClass="flag-modal-body"
+      @closeModal={{@closeModal}}
+      @submitOnEnter={{false}}
+      @title={{i18n this.title}}
+      {{on "keydown" this.onKeydown}}
+    >
+      <:body>
+        <p>{{trustHTML (i18n "flagging.review_process_description")}}</p>
+        <PluginOutlet
+          @connectorTagName="div"
+          @name="after-flag-modal-review-process-description"
+          @outletArgs={{lazyHash post=@model.flagModel}}
+        />
+        <form>
+          {{#each
+            (reportingChoices this.flagsAvailable this.canReportIllegalContent)
+            as |choice|
+          }}
+            {{#if (eq choice.kind "flag")}}
+              <FlagActionType
+                @changePostActionType={{this.changePostActionType}}
+                @flag={{choice.flag}}
+                @isConfirmed={{this.isConfirmed}}
+                @message={{this.message}}
+                @onChangeConfirmed={{fn (mut this.isConfirmed)}}
+                @onChangeMessage={{fn (mut this.message)}}
+                @selectedFlag={{this.selected}}
+                @staffFlagsAvailable={{this.staffFlagsAvailable}}
+                @username={{@model.flagModel.username}}
+              />
+            {{else}}
+              <div class="illegal-content-report-choice flag-action-type">
+                <div class="controls">
+                  <label class="radio checkbox-label">
+                    <input
+                      checked={{this.dsaSelected}}
+                      id="radio_dsa_report"
+                      name="post_action_type_index"
+                      type="radio"
+                      {{on "click" this.selectIllegalReport}}
+                    />
+                    <div class="flag-action-type-details">
+                      <strong class="flag-name">{{i18n
+                          "dsa_notice.choice_title"
+                        }}</strong>
+                      <div class="description">{{i18n
+                          "dsa_notice.choice_description"
+                        }}</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            {{/if}}
+          {{else}}
+            {{i18n "flagging.cant"}}
+          {{/each}}
+        </form>
+        <PluginOutlet
+          @connectorTagName="div"
+          @name="flag-modal-bottom"
+          @outletArgs={{lazyHash post=@model.flagModel}}
+        />
+      </:body>
+      <:footer>
+        {{#if this.dsaSelected}}
+          <DButton
+            class="btn-primary flag-modal__continue"
+            @action={{this.reportIllegalContent}}
+            @label="continue"
+          />
+        {{else}}
+          <DButton
+            class="btn-primary flag-modal__create-flag"
+            @action={{this.createFlag}}
+            @disabled={{not this.submitEnabled}}
+            @icon={{if this.selected.require_message "envelope" "flag"}}
+            @label={{this.submitLabel}}
+            @title="flagging.submit_tooltip"
+          />
+
+          {{#if this.canSendWarning}}
+            <DButton
+              class="btn-danger flag-modal__send-warning"
+              @action={{this.createFlagAsWarning}}
+              @disabled={{not this.submitEnabled}}
+              @icon="triangle-exclamation"
+              @label="flagging.official_warning"
+            />
+          {{/if}}
+
+          {{#if this.canTakeAction}}
+            <ReviewableBundledAction
+              class="flag-modal__take-action"
+              @bundle={{this.flagActions}}
+              @performAction={{this.takeAction}}
+              @reviewableUpdating={{not this.submitEnabled}}
+            />
+
+            <DButton
+              class="btn-danger flag-modal__flag-for-review"
+              @action={{this.flagForReview}}
+              @disabled={{not this.submitEnabled}}
+              @icon="triangle-exclamation"
+              @label="flagging.flag_for_review"
+            />
+          {{/if}}
+
+          {{#if this.showDeleteSpammer}}
+            <DButton
+              class="btn-danger delete-spammer flag-modal__delete-spammer"
+              @action={{this.deleteSpammer}}
+              @disabled={{not this.submitEnabled}}
+              @icon="triangle-exclamation"
+              @label="flagging.delete_spammer"
+            />
+          {{/if}}
+        {{/if}}
+      </:footer>
+    </DModal>
+  </template>
+}

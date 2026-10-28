@@ -1,0 +1,69 @@
+# frozen_string_literal: true
+
+RSpec.describe EmojisController do
+  fab!(:user_1, :user)
+
+  before { sign_in(user_1) }
+
+  describe "#index" do
+    before do
+      CustomEmoji.destroy_all
+      CustomEmoji.create!(name: "cat", upload: Fabricate(:upload))
+      Emoji.clear_cache
+    end
+
+    after do
+      CustomEmoji.destroy_all
+      Emoji.clear_cache
+    end
+
+    it "returns the emojis list" do
+      get "/emojis.json"
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body.keys).to eq(
+        %w[
+          smileys_&_emotion
+          people_&_body
+          animals_&_nature
+          food_&_drink
+          travel_&_places
+          activities
+          objects
+          symbols
+          flags
+          default
+        ],
+      )
+    end
+
+    it "flags the emojis that have an animation" do
+      get "/emojis.json"
+
+      emojis = response.parsed_body.values.flatten.index_by { _1["name"] }
+      expect(emojis.dig("wink", "animated")).to eq(true)
+      expect(emojis.dig("abacus", "animated")).to eq(false)
+    end
+  end
+
+  describe "#search_aliases" do
+    it "returns the search aliases list" do
+      get "/emojis/search-aliases.json"
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["grinning_face"]).to include(
+        "cheerful",
+        "cheery",
+        "face",
+        "grin",
+        "grinning",
+        "happy",
+        "laugh",
+        "nice",
+        "smile",
+        "smiling",
+        "teeth",
+      )
+    end
+  end
+end

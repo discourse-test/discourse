@@ -1,0 +1,389 @@
+import Component from "@glimmer/component";
+import { registerDestructor } from "@ember/destroyable";
+import { next, schedule } from "@ember/runloop";
+import { service } from "@ember/service";
+import { dasherize } from "@ember/string";
+import { trustHTML } from "@ember/template";
+import { modifier } from "ember-modifier";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import SearchMenu from "discourse/components/search-menu";
+import bodyClass from "discourse/helpers/body-class";
+import getURL from "discourse/lib/get-url";
+import { headerOffset } from "discourse/lib/offset-calculator";
+import { prioritizeNameFallback } from "discourse/lib/settings";
+import { sanitize } from "discourse/lib/text";
+import { applyValueTransformer } from "discourse/lib/transformer";
+import { defaultHomepage, escapeExpression } from "discourse/lib/utilities";
+import DButton from "discourse/ui-kit/d-button";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import I18n, { i18n } from "discourse-i18n";
+
+const claimedLocations = new Map();
+const reportedLocations = new Set();
+
+export const ALL_PAGES_EXCLUDED_ROUTES = [
+  "account-created.edit-email",
+  "account-created.index",
+  "account-created.resent",
+  "activate-account",
+  "full-page-search",
+  "invites.show",
+  "login",
+  "password-reset",
+  "signup",
+];
+
+export default class WelcomeBanner extends Component {
+  @service router;
+  @service site;
+  @service siteSettings;
+  @service currentUser;
+  @service appEvents;
+  @service search;
+
+  checkViewport = modifier((element) => {
+    if (!this.site.can_search) {
+      this.search.welcomeBannerSearchInViewport = false;
+      return;
+    }
+
+    const searchMenu =
+      element.querySelector(".welcome-banner__search-menu") ?? element;
+
+    const checkVisibility = () => {
+      // Use getBoundingClientRect for reliable visibility detection.
+      // IntersectionObserver's isIntersecting can return stale values during
+      // SPA navigation, but getBoundingClientRect is always accurate.
+      // The banner search stays the only visible search bar while any part of
+      // it peeks below the header; the header search replaces it exactly when
+      // it is fully tucked away, so the two are never both usable.
+      const isUsable =
+        searchMenu.getBoundingClientRect().bottom > headerOffset();
+
+      const previousInputId = this.search.currentSearchInputId;
+      this.search.welcomeBannerSearchInViewport = isUsable;
+
+      if (
+        this.search.currentSearchInputId !== previousInputId &&
+        document.activeElement?.id === previousInputId
+      ) {
+        next(() => {
+          if (this.isDestroying) {
+            return;
+          }
+          this.search.focusSearchInput();
+          if (document.activeElement?.tagName !== "INPUT") {
+            document.getElementById(previousInputId)?.focus();
+          }
+        });
+      }
+    };
+
+    // Use IntersectionObserver only as a trigger for when to check visibility,
+    // not to determine actual visibility state. The handoff happens partway
+    // through the banner's crossing, so trigger throughout the crossing rather
+    // than only at full visibility.
+    const threshold = Array.from({ length: 101 }, (_, i) => i / 100);
+    const observer = new IntersectionObserver(checkVisibility, { threshold });
+    observer.observe(element);
+
+    // Set to true immediately when the modifier sets up, since the welcome banner
+    // is always rendered at the top of the page.
+    this.search.welcomeBannerSearchInViewport = true;
+
+    return () => {
+      observer.disconnect();
+      this.search.welcomeBannerSearchInViewport = false;
+    };
+  });
+
+  handoffFocus = modifier((element) => {
+    const onFocusin = (event) => {
+      if (event.target.id !== "welcome-banner-search-input") {
+        return;
+      }
+
+      const activeInput = document.getElementById(
+        this.search.currentSearchInputId
+      );
+      if (activeInput && activeInput !== event.target) {
+        activeInput.focus();
+      }
+    };
+
+    element.addEventListener("focusin", onFocusin);
+    return () => element.removeEventListener("focusin", onFocusin);
+  });
+
+  handleKeyboardShortcut = modifier(() => {
+    if (!this.site.can_search) {
+      return;
+    }
+
+    const cb = (appEvent) => {
+      if (
+        appEvent.type === "search" &&
+        this.search.welcomeBannerSearchInViewport
+      ) {
+        this.search.focusSearchInput();
+        appEvent.event.preventDefault();
+      }
+    };
+    this.appEvents.on("header:keyboard-trigger", cb);
+    return () => this.appEvents.off("header:keyboard-trigger", cb);
+  });
+
+  constructor() {
+    super(...arguments);
+
+    const { location } = this.args;
+    if (location === undefined) {
+      return;
+    }
+
+    claimedLocations.set(location, (claimedLocations.get(location) ?? 0) + 1);
+    registerDestructor(this, () => {
+      const remaining = claimedLocations.get(location) - 1;
+      if (remaining > 0) {
+        claimedLocations.set(location, remaining);
+      } else {
+        claimedLocations.delete(location);
+      }
+    });
+
+    // Other render points are constructed in this same pass, so wait for them
+    // before deciding that nobody claimed the location.
+    schedule("afterRender", this, this.#reportUnclaimedLocation);
+  }
+
+  // Where the banner renders. Core offers the site setting's locations; a
+  // customization can return a location of its own and render the banner independently,
+  // as long as it passes a @location that matches the transformer's value
+  get location() {
+    return applyValueTransformer(
+      "welcome-banner-location",
+      this.siteSettings.welcome_banner_location
+    );
+  }
+
+  // A bare <WelcomeBanner> without a @location arg will render regardless of the claimed location
+  get matchesLocation() {
+    return (
+      this.args.location === undefined || this.args.location === this.location
+    );
+  }
+
+  get displayForRoute() {
+    const { currentRouteName } = this.router;
+    const { top_menu, welcome_banner_page_visibility } = this.siteSettings;
+
+    const shouldDisplayForRoute = this.#shouldDisplayForRoute(
+      welcome_banner_page_visibility,
+      top_menu,
+      currentRouteName
+    );
+
+    return applyValueTransformer(
+      "welcome-banner-display-for-route",
+      shouldDisplayForRoute,
+      {
+        welcomeBannerPageVisibility: welcome_banner_page_visibility,
+        currentRouteName,
+        homepage: `discovery.${defaultHomepage()}`,
+      }
+    );
+  }
+
+  // The icon is a shortcut to advanced search; a consumer that has made the
+  // input mean more than searching can drop it.
+  get showAdvancedSearchIcon() {
+    return applyValueTransformer("search-advanced-icon-enabled", true, {
+      location: "welcome-banner",
+    });
+  }
+
+  get headerText() {
+    const site_name = this.siteSettings.title || "";
+
+    let key, args;
+
+    if (!this.currentUser) {
+      key = "welcome_banner.header.anonymous_members";
+      args = { site_name };
+    } else {
+      const isNewUser = !this.currentUser.previous_visit_at;
+      key = isNewUser
+        ? "welcome_banner.header.new_members"
+        : "welcome_banner.header.logged_in_members";
+      args = {
+        site_name,
+        preferred_display_name: sanitize(
+          prioritizeNameFallback(
+            this.currentUser.name,
+            this.currentUser.username
+          )
+        ),
+      };
+    }
+
+    return i18n(key, args);
+  }
+
+  get subheaderText() {
+    const memberKey = this.currentUser
+      ? "logged_in_members"
+      : "anonymous_members";
+    return I18n.lookup(`welcome_banner.subheader.${memberKey}`);
+  }
+
+  get shouldDisplay() {
+    return (
+      this.siteSettings.enable_welcome_banner &&
+      this.matchesLocation &&
+      this.displayForRoute
+    );
+  }
+
+  get bodyClasses() {
+    return this.shouldDisplay && this.search.welcomeBannerSearchInViewport
+      ? "welcome-banner--enabled welcome-banner--visible"
+      : this.shouldDisplay
+        ? "welcome-banner--enabled"
+        : "";
+  }
+
+  get locationClass() {
+    return `--location-${dasherize(this.location)}`;
+  }
+
+  get bgImgClass() {
+    if (this.siteSettings.welcome_banner_image) {
+      return `--with-bg-img`;
+    }
+  }
+
+  get bgImgStyle() {
+    if (this.siteSettings.welcome_banner_image) {
+      return trustHTML(
+        `background-image:url(${escapeExpression(
+          this.siteSettings.welcome_banner_image
+        )});`
+      );
+    }
+  }
+
+  get textColorStyle() {
+    if (
+      this.siteSettings.welcome_banner_image &&
+      this.siteSettings.welcome_banner_text_color
+    ) {
+      return trustHTML(
+        `color:${escapeExpression(this.siteSettings.welcome_banner_text_color)};`
+      );
+    }
+  }
+
+  #reportUnclaimedLocation() {
+    if (this.isDestroying) {
+      return;
+    }
+
+    const { location } = this;
+    if (
+      !this.siteSettings.enable_welcome_banner ||
+      !this.displayForRoute ||
+      claimedLocations.has(location) ||
+      reportedLocations.has(location)
+    ) {
+      return;
+    }
+
+    reportedLocations.add(location);
+    // eslint-disable-next-line no-console
+    console.warn(
+      `Welcome banner: no render point for location "${location}", so the ` +
+        `banner will not be shown. Either render <WelcomeBanner @location="${location}" /> ` +
+        "where you want it, or check the value returned by the " +
+        "welcome-banner-location transformer."
+    );
+  }
+
+  #shouldDisplayForRoute(
+    welcome_banner_page_visibility,
+    top_menu,
+    currentRouteName
+  ) {
+    switch (welcome_banner_page_visibility) {
+      case "top_menu_pages":
+        return top_menu
+          .split("|")
+          .some((menuItem) => `discovery.${menuItem}` === currentRouteName);
+      case "homepage":
+        return currentRouteName === `discovery.${defaultHomepage()}`;
+      case "discovery":
+        return currentRouteName.startsWith("discovery.");
+      case "all_pages":
+        return (
+          !currentRouteName.startsWith("admin") &&
+          !ALL_PAGES_EXCLUDED_ROUTES.some(
+            (routeName) => routeName === currentRouteName
+          )
+        );
+      default:
+        return false;
+    }
+  }
+
+  <template>
+    {{bodyClass this.bodyClasses}}
+    {{#if this.shouldDisplay}}
+      <div
+        class={{dConcatClass
+          "welcome-banner"
+          this.locationClass
+          this.bgImgClass
+        }}
+        {{this.checkViewport}}
+        {{this.handoffFocus}}
+        {{this.handleKeyboardShortcut}}
+      >
+        <div
+          class="custom-search-banner-wrap welcome-banner__wrap"
+          style={{if this.bgImgStyle this.bgImgStyle}}
+        >
+          <div
+            class="welcome-banner__title"
+            style={{if this.textColorStyle this.textColorStyle}}
+          >
+            {{trustHTML this.headerText}}
+            {{#if this.subheaderText}}
+              <p class="welcome-banner__subheader">
+                {{trustHTML this.subheaderText}}
+              </p>
+            {{/if}}
+          </div>
+          <PluginOutlet @name="welcome-banner-below-headline" />
+          {{#if this.site.can_search}}
+            <div class="search-menu welcome-banner__search-menu">
+              {{#if this.showAdvancedSearchIcon}}
+                <DButton
+                  class="search-icon"
+                  @href={{getURL "/search?expanded=true"}}
+                  @icon="magnifying-glass"
+                  @title="search.open_advanced"
+                />
+              {{/if}}
+              <SearchMenu
+                @hideResults={{not this.search.welcomeBannerSearchInViewport}}
+                @location="welcome-banner"
+                @searchInputId="welcome-banner-search-input"
+                @searchInputPlaceholder="welcome_banner.search_placeholder"
+              />
+            </div>
+          {{/if}}
+          <PluginOutlet @name="welcome-banner-below-input" />
+        </div>
+      </div>
+    {{/if}}
+  </template>
+}

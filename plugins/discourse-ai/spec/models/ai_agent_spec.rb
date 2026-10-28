@@ -1,0 +1,899 @@
+# frozen_string_literal: true
+
+RSpec.describe AiAgent do
+  subject(:basic_agent) do
+    AiAgent.new(
+      name: "test",
+      description: "test",
+      system_prompt: "test",
+      tools: [],
+      allowed_group_ids: [],
+    )
+  end
+
+  fab!(:llm_model)
+  fab!(:seeded_llm_model) { Fabricate(:llm_model, id: -1) }
+
+  before { enable_current_plugin }
+
+  describe "#allowed_group_ids" do
+    it "aliases Everyone while granular permissions are enabled without changing stored groups" do
+      group = Fabricate(:group)
+      ids = [group.id, Group::AUTO_GROUPS[:everyone], Group::AUTO_GROUPS[:logged_in_users]]
+      agent = Fabricate(:ai_agent, allowed_group_ids: ids)
+
+      SiteSetting.granular_anonymous_and_logged_in_groups_permissions = false
+      expect(agent.allowed_group_ids).to eq(ids)
+
+      SiteSetting.granular_anonymous_and_logged_in_groups_permissions = true
+      expect(agent.allowed_group_ids).to eq([group.id, Group::AUTO_GROUPS[:logged_in_users]])
+      agent.update!(description: "Updated description")
+
+      SiteSetting.granular_anonymous_and_logged_in_groups_permissions = false
+      expect(agent.reload.allowed_group_ids).to eq(ids)
+    end
+  end
+
+  it "refreshes cached agent permissions when granular permissions are toggled" do
+    user = Fabricate(:user)
+    agent =
+      Fabricate(
+        :ai_agent,
+        allowed_group_ids: [Group::AUTO_GROUPS[:everyone]],
+        user: Fabricate(:user),
+      )
+
+    SiteSetting.granular_anonymous_and_logged_in_groups_permissions = false
+    cached_agent = AiAgent.all_agents.find { |candidate| candidate.id == agent.id }
+    expect(cached_agent.allowed_group_ids).to eq([Group::AUTO_GROUPS[:everyone]])
+    expect(AiAgent.agent_users(user: user).map { |candidate| candidate[:id] }).to include(agent.id)
+
+    SiteSetting.granular_anonymous_and_logged_in_groups_permissions = true
+    cached_agent = AiAgent.all_agents.find { |candidate| candidate.id == agent.id }
+    expect(cached_agent.allowed_group_ids).to eq([Group::AUTO_GROUPS[:logged_in_users]])
+    expect(AiAgent.agent_users(user: user).map { |candidate| candidate[:id] }).to include(agent.id)
+
+    SiteSetting.granular_anonymous_and_logged_in_groups_permissions = false
+    cached_agent = AiAgent.all_agents.find { |candidate| candidate.id == agent.id }
+    expect(cached_agent.allowed_group_ids).to eq([Group::AUTO_GROUPS[:everyone]])
+    expect(AiAgent.agent_users(user: user).map { |candidate| candidate[:id] }).to include(agent.id)
+  end
+
+  describe "#update!" do
+    fab!(:spam_agent, :ai_agent)
+    fab!(:spam_settings) do
+      AiModerationSetting.create!(
+        setting_type: :spam,
+        ai_agent: spam_agent,
+        llm_model: seeded_llm_model,
+      )
+    end
+
+    it "updates the spam model when the configured agent's default model changes" do
+      spam_agent.update!(default_llm_id: llm_model.id)
+
+      expect(spam_settings.reload.llm_model_id).to eq(llm_model.id)
+    end
+
+    it "preserves the spam model when another agent's default model changes" do
+      other_agent = Fabricate(:ai_agent, default_llm_id: seeded_llm_model.id)
+
+      other_agent.update!(default_llm_id: llm_model.id)
+
+      expect(spam_settings.reload.llm_model_id).to eq(seeded_llm_model.id)
+    end
+
+    it "preserves an explicit spam model when saving unrelated agent changes" do
+      spam_agent.update!(default_llm_id: llm_model.id)
+      spam_settings.update!(llm_model_id: seeded_llm_model.id)
+
+      spam_agent.update!(description: "Updated spam detector")
+
+      expect(spam_settings.reload.llm_model_id).to eq(seeded_llm_model.id)
+    end
+
+    it "preserves an explicit spam model when clearing the agent's default" do
+      spam_agent.update!(default_llm_id: llm_model.id)
+      spam_settings.update!(llm_model_id: seeded_llm_model.id)
+
+      spam_agent.update!(default_llm_id: nil)
+
+      expect(spam_settings.reload.llm_model_id).to eq(seeded_llm_model.id)
+    end
+
+    it "preserves the spam model when the agent update fails validation" do
+      expect(spam_agent.update(default_llm_id: llm_model.id, description: nil)).to eq(false)
+
+      expect(spam_settings.reload.llm_model_id).to eq(seeded_llm_model.id)
+    end
+
+    it "does not configure spam detection when updating an agent without spam settings" do
+      spam_settings.destroy!
+
+      spam_agent.update!(default_llm_id: llm_model.id)
+
+      expect(AiModerationSetting.spam).to be_nil
+    end
+  end
+
+  it "defaults subagent_ids to an empty array and exposes them on class instances" do
+    agent = Fabricate(:ai_agent)
+
+    expect(agent.subagent_ids).to eq([])
+    expect(agent.class_instance.subagent_ids).to eq([])
+  end
+
+  it "normalizes subagent IDs while preserving order and removing duplicates" do
+    first_child = Fabricate(:ai_agent)
+    second_child = Fabricate(:ai_agent)
+    agent =
+      Fabricate.build(
+        :ai_agent,
+        subagent_ids: [first_child.id.to_s, second_child.id, first_child.id],
+      )
+
+    expect(agent.save).to eq(true)
+    expect(agent.subagent_ids).to eq([first_child.id, second_child.id])
+  end
+
+  it "rejects invalid, missing, self-referencing, and over-limit subagent IDs" do
+    child = Fabricate(:ai_agent)
+    agent = Fabricate.build(:ai_agent, subagent_ids: ["not-an-id"])
+    expect(agent).not_to be_valid
+
+    agent.subagent_ids = [child.id.to_f]
+    expect(agent).not_to be_valid
+    expect(agent.errors[:subagent_ids]).to include(
+      I18n.t("discourse_ai.ai_bot.agents.invalid_subagent_ids"),
+    )
+
+    agent.subagent_ids = [child.id, 999_999]
+    expect(agent).not_to be_valid
+
+    agent.save!(validate: false)
+    agent.subagent_ids = [agent.id]
+    expect(agent).not_to be_valid
+
+    agent.subagent_ids = (1..(AiAgent::MAX_SUBAGENTS + 1)).to_a
+    expect(agent).not_to be_valid
+  end
+
+  it "allows at most 100 URL-backed RAG sources" do
+    agent = Fabricate.build(:ai_agent)
+    AiAgent::MAX_RAG_DOCUMENT_SOURCES.times do |index|
+      agent.rag_document_sources.build(url: "https://example.com/knowledge/#{index}")
+    end
+
+    expect(agent).to be_valid
+
+    agent.rag_document_sources.build(url: "https://example.com/knowledge/over-limit")
+
+    expect(agent).not_to be_valid
+    expect(agent.errors[:base]).to include(
+      I18n.t(
+        "discourse_ai.ai_bot.agents.too_many_rag_document_sources",
+        max: AiAgent::MAX_RAG_DOCUMENT_SOURCES,
+      ),
+    )
+  end
+
+  it "does not allow system agents to change subagent IDs" do
+    child = Fabricate(:ai_agent)
+    system_agent = Fabricate(:ai_agent, system: true)
+
+    system_agent.subagent_ids = [child.id]
+
+    expect(system_agent).not_to be_valid
+    expect(system_agent.errors[:base]).to include(
+      I18n.t("discourse_ai.ai_bot.agents.cannot_edit_system_agent"),
+    )
+  end
+
+  it "flushes the agent cache when subagent IDs change" do
+    child = Fabricate(:ai_agent)
+    parent = Fabricate(:ai_agent)
+    AiAgent.all_agents(enabled_only: false)
+
+    parent.update!(subagent_ids: [child.id])
+
+    expect(AiAgent.agent_cache[:value]).to be_nil
+  end
+
+  it "removes a destroyed agent from parent allowlists and flushes the cache" do
+    child = Fabricate(:ai_agent)
+    parent = Fabricate(:ai_agent, subagent_ids: [child.id])
+    AiAgent.all_agents(enabled_only: false)
+
+    child.destroy!
+
+    expect(parent.reload.subagent_ids).to eq([])
+    expect(AiAgent.agent_cache[:value]).to be_nil
+  end
+
+  it "rejects a spawn_agent tool when subagents are configured" do
+    custom_tool = Fabricate(:ai_tool, tool_name: "spawn_agent")
+    child = Fabricate(:ai_agent)
+    agent =
+      Fabricate.build(
+        :ai_agent,
+        tools: [["custom-#{custom_tool.id}", nil, false]],
+        subagent_ids: [child.id],
+      )
+
+    expect(agent).not_to be_valid
+    expect(agent.errors[:tools]).to include(
+      I18n.t("discourse_ai.ai_bot.agents.subagent_tool_collision"),
+    )
+  end
+
+  it "exposes system agent thinking effort on class instances" do
+    agent_record =
+      AiAgent.find(DiscourseAi::Agents::Agent.system_agents[DiscourseAi::Agents::Creative])
+    agent_record.update!(thinking_effort: "max")
+
+    agent = agent_record.class_instance.new
+
+    expect(agent.thinking_effort).to eq("max")
+  end
+
+  it "declares a default thinking effort for reasoning-enabled system agents" do
+    {
+      DiscourseAi::Agents::Creative => "low",
+      DiscourseAi::Agents::General => "low",
+      DiscourseAi::Agents::DiscourseHelper => "low",
+      DiscourseAi::Agents::SqlHelper => "medium",
+      DiscourseAi::Agents::ForumResearcher => "high",
+    }.each do |klass, effort|
+      expect(klass.new.thinking_effort).to eq(effort),
+      "expected #{klass} to default to #{effort.inspect} thinking effort, got #{klass.new.thinking_effort.inspect}"
+    end
+  end
+
+  it "seeds the default thinking effort on deploy without clobbering admin choices" do
+    creative_id = DiscourseAi::Agents::Agent.system_agents[DiscourseAi::Agents::Creative]
+    general_id = DiscourseAi::Agents::Agent.system_agents[DiscourseAi::Agents::General]
+
+    # an agent that was never configured, and one an admin has customized
+    AiAgent.where(id: creative_id).update_all(thinking_effort: nil)
+    AiAgent.where(id: general_id).update_all(thinking_effort: "high")
+
+    # load (not require_relative) so the seeding script actually re-executes here
+    load Rails.root.join("plugins/discourse-ai/db/fixtures/agents/603_ai_agents.rb") # rubocop:disable Discourse/Plugins/UseRequireRelative
+
+    expect(AiAgent.find(creative_id).thinking_effort).to eq("low") # seeded default
+    expect(AiAgent.find(general_id).thinking_effort).to eq("high") # admin choice preserved
+  end
+
+  it "clears AI helper prompt permissions after changes" do
+    agent = AiAgent.find(SiteSetting.ai_helper_proofreader_agent)
+    DiscourseAi::AiHelper::Assistant.prompt_cache[:value] = "cached prompts"
+
+    agent.update!(allowed_group_ids: [Group::AUTO_GROUPS[:staff]])
+
+    expect(DiscourseAi::AiHelper::Assistant.prompt_cache[:value]).to be_nil
+  end
+
+  it "keeps AI helper prompt permissions after unrelated changes" do
+    agent =
+      AiAgent.create!(
+        name: "unrelated agent",
+        description: "test",
+        system_prompt: "test",
+        tools: [],
+        allowed_group_ids: [],
+      )
+    DiscourseAi::AiHelper::Assistant.prompt_cache[:value] = "cached prompts"
+
+    agent.update!(allowed_group_ids: [Group::AUTO_GROUPS[:staff]])
+
+    expect(DiscourseAi::AiHelper::Assistant.prompt_cache[:value]).to eq("cached prompts")
+  end
+
+  it "validates tools" do
+    Fabricate(:ai_tool, id: 1)
+    Fabricate(:ai_tool, id: 2, name: "Archie search", tool_name: "search")
+
+    expect(basic_agent.valid?).to eq(true)
+
+    basic_agent.tools = %w[search image_generation]
+    expect(basic_agent.valid?).to eq(true)
+
+    basic_agent.tools = %w[search image_generation search]
+    expect(basic_agent.valid?).to eq(false)
+    expect(basic_agent.errors[:tools]).to eq(["Can not have duplicate tools"])
+
+    basic_agent.tools = [
+      ["custom-1", { test: "test" }, false],
+      ["custom-2", { test: "test" }, false],
+    ]
+    expect(basic_agent.valid?).to eq(true)
+    expect(basic_agent.errors[:tools]).to eq([])
+
+    basic_agent.tools = [
+      ["custom-1", { test: "test" }, false],
+      ["custom-1", { test: "test" }, false],
+    ]
+    expect(basic_agent.valid?).to eq(false)
+    expect(basic_agent.errors[:tools]).to eq(["Can not have duplicate tools"])
+
+    basic_agent.tools = [
+      ["custom-1", { test: "test" }, false],
+      ["custom-2", { test: "test" }, false],
+      "image_generation",
+    ]
+    expect(basic_agent.valid?).to eq(true)
+    expect(basic_agent.errors[:tools]).to eq([])
+
+    basic_agent.tools = [
+      ["custom-1", { test: "test" }, false],
+      ["custom-2", { test: "test" }, false],
+      "Search",
+    ]
+    expect(basic_agent.valid?).to eq(false)
+    expect(basic_agent.errors[:tools]).to eq(["Can not have duplicate tools"])
+  end
+
+  describe "provider-native tools" do
+    fab!(:gemini_model)
+    fab!(:openai_chat_model) do
+      Fabricate(:llm_model, url: "https://api.openai.com/v1/chat/completions")
+    end
+
+    it "requires a forced default LLM that supports the native tool" do
+      basic_agent.tools = ["native-web_search"]
+
+      # no forced default LLM
+      expect(basic_agent.valid?).to eq(false)
+      expect(basic_agent.errors[:tools]).to include(
+        I18n.t("discourse_ai.ai_bot.agents.native_tool_requires_forced_llm"),
+      )
+
+      # forced LLM whose provider does not support web search (chat completions)
+      basic_agent.default_llm = openai_chat_model
+      basic_agent.force_default_llm = true
+      expect(basic_agent.valid?).to eq(false)
+      expect(basic_agent.errors[:tools]).to include(
+        I18n.t("discourse_ai.ai_bot.agents.native_tool_unsupported_by_llm"),
+      )
+
+      # forced LLM that supports web search
+      basic_agent.default_llm = gemini_model
+      expect(basic_agent.valid?).to eq(true)
+    end
+  end
+
+  describe ".ensure_users!" do
+    [false, true].product([false, true])
+      .each do |ai_enabled, bot_enabled|
+        it "only provisions automatically with both settings enabled (AI: #{ai_enabled}, bot: #{bot_enabled})" do
+          SiteSetting.discourse_ai_enabled = ai_enabled
+          SiteSetting.ai_bot_enabled = bot_enabled
+          agent = Fabricate(:ai_agent)
+          provisioning_enabled = ai_enabled && bot_enabled
+
+          expect(agent.needs_user?).to eq(provisioning_enabled)
+          expect { 2.times { AiAgent.ensure_users! } }.to change(User, :count).by(
+            provisioning_enabled ? 1 : 0,
+          )
+          expect(agent.reload.user.present?).to eq(provisioning_enabled)
+        end
+      end
+
+    it "preserves existing users when automatic provisioning is disabled" do
+      agent = Fabricate(:ai_agent)
+      user = agent.create_user!
+      SiteSetting.ai_bot_enabled = false
+
+      expect { AiAgent.ensure_users! }.not_to change(User, :count)
+      expect(agent.reload.user).to eq(user)
+      expect(user.reload).to be_active
+    end
+
+    it "skips disabled, nonconversational, and unsupported system agents" do
+      SiteSetting.ai_bot_enabled = true
+      disabled_agent = Fabricate(:ai_agent, enabled: false)
+      nonconversational_agent = Fabricate(:ai_agent, allow_personal_messages: false)
+      unsupported_agent =
+        AiAgent.find(DiscourseAi::Agents::Agent.system_agents[DiscourseAi::Agents::LocaleDetector])
+      unsupported_agent.update!(enabled: true, allow_personal_messages: true)
+      expect(unsupported_agent.needs_user?).to eq(false)
+
+      expect { AiAgent.ensure_users! }.not_to change(User, :count)
+      expect(
+        [disabled_agent, nonconversational_agent, unsupported_agent].map do |agent|
+          agent.reload.user_id
+        end,
+      ).to eq([nil, nil, nil])
+    end
+  end
+
+  describe "#needs_user?" do
+    it "requires a conversational entry point or a forced default model" do
+      SiteSetting.ai_bot_enabled = true
+      basic_agent.allow_personal_messages = false
+
+      expect(basic_agent.needs_user?).to eq(false)
+
+      %i[
+        force_default_llm
+        allow_topic_mentions
+        allow_personal_messages
+        allow_chat_direct_messages
+        allow_chat_channel_mentions
+      ].each do |field|
+        basic_agent.public_send("#{field}=", true)
+        expect(basic_agent.needs_user?).to eq(true), "expected #{field} to require a user"
+        basic_agent.public_send("#{field}=", false)
+      end
+
+      basic_agent.allow_personal_messages = true
+      basic_agent.enabled = false
+      expect(basic_agent.needs_user?).to eq(false)
+    end
+  end
+
+  it "provisions a conversational agent idempotently even when both features are disabled" do
+    SiteSetting.discourse_ai_enabled = false
+    SiteSetting.ai_bot_enabled = false
+    agent = Fabricate(:ai_agent, allow_personal_messages: true, default_llm: llm_model)
+
+    expect { 2.times { agent.ensure_user! } }.to change { User.count }.by(1)
+    expect(agent.reload.user).to be_present
+  end
+
+  it "allows creation of user" do
+    user = basic_agent.create_user!
+    expect(user.username).to eq("test_bot")
+    expect(user.name).to eq("Test")
+    expect(user.bot?).to be(true)
+    expect(user.id).to be < DiscourseAi::BotUser::FIRST_ID
+  end
+
+  it "does not recycle an id another agent still points at" do
+    other = Fabricate(:ai_agent, name: "other")
+    stale_user = other.create_user!
+    stale_user.destroy!
+    other.update_columns(user_id: stale_user.id)
+    PluginStore.remove(DiscourseAi::PLUGIN_NAME, DiscourseAi::BotUser::FLOOR_KEY)
+
+    user = basic_agent.create_user!
+
+    expect(user.id).to be < stale_user.id
+  end
+
+  it "does not recycle an id an llm model still points at" do
+    llm_model.update_columns(user_id: -5000)
+    PluginStore.remove(DiscourseAi::PLUGIN_NAME, DiscourseAi::BotUser::FLOOR_KEY)
+
+    user = basic_agent.create_user!
+
+    expect(user.id).to eq(-5001)
+  end
+
+  it "does not recycle the id of a bot user that was deleted" do
+    agent = Fabricate(:ai_agent, name: "deleted")
+    deleted_id = agent.create_user!.id
+    UserDestroyer.new(Discourse.system_user).destroy(agent.reload.user)
+
+    user = basic_agent.create_user!
+
+    expect(user.id).to be < deleted_id
+  end
+
+  it "clears the reference when the bot user is destroyed" do
+    agent = Fabricate(:ai_agent, name: "destroyed")
+    user = agent.create_user!
+
+    UserDestroyer.new(Discourse.system_user).destroy(user)
+
+    expect(agent.reload.user_id).to eq(nil)
+  end
+
+  describe "#can_have_bot_user?" do
+    def system_agent(klass)
+      AiAgent.find(DiscourseAi::Agents::Agent.system_agents[klass])
+    end
+
+    it "is true for custom agents" do
+      expect(Fabricate(:ai_agent).can_have_bot_user?).to eq(true)
+    end
+
+    it "is true for an internal agent that already owns one" do
+      agent = system_agent(DiscourseAi::Agents::LocaleDetector)
+      agent.update_columns(user_id: Fabricate(:user).id)
+
+      expect(agent.can_have_bot_user?).to eq(true)
+      expect(agent.supports_bot_user?).to eq(false)
+    end
+
+    it "is false when the reference dangles, so the UI matches the endpoint" do
+      agent = system_agent(DiscourseAi::Agents::LocaleDetector)
+      agent.update_columns(user_id: -123_456)
+
+      expect(agent.can_have_bot_user?).to eq(false)
+    end
+
+    it "refuses to assign a bot user to an agent that has no use for one" do
+      agent = system_agent(DiscourseAi::Agents::LocaleDetector)
+      agent.user_id = Fabricate(:user).id
+
+      expect(agent).not_to be_valid
+    end
+
+    it "is true for agents users talk to" do
+      expect(system_agent(DiscourseAi::Agents::General).can_have_bot_user?).to eq(true)
+      expect(system_agent(DiscourseAi::Agents::Discover).can_have_bot_user?).to eq(true)
+    end
+
+    it "is false for agents a feature invokes internally" do
+      expect(system_agent(DiscourseAi::Agents::LocaleDetector).can_have_bot_user?).to eq(false)
+      expect(system_agent(DiscourseAi::Agents::Summarizer).can_have_bot_user?).to eq(false)
+    end
+  end
+
+  it "removes all rag embeddings when rag params change" do
+    agent =
+      AiAgent.create!(
+        name: "test",
+        description: "test",
+        system_prompt: "test",
+        tools: [],
+        allowed_group_ids: [],
+        rag_chunk_tokens: 10,
+        rag_chunk_overlap_tokens: 5,
+      )
+
+    id =
+      RagDocumentFragment.create!(
+        target: agent,
+        fragment: "test",
+        fragment_number: 1,
+        upload: Fabricate(:upload),
+      ).id
+
+    agent.rag_chunk_tokens = 20
+    agent.save!
+
+    expect(RagDocumentFragment.exists?(id)).to eq(false)
+  end
+
+  it "defines singleton methods on system agent classes" do
+    forum_helper = AiAgent.find_by(name: "Forum Helper")
+    forum_helper.update!(
+      user_id: 1,
+      default_llm_id: llm_model.id,
+      allow_topic_mentions: true,
+      allow_personal_messages: true,
+      allow_chat_channel_mentions: true,
+      allow_chat_direct_messages: true,
+    )
+
+    klass = forum_helper.class_instance
+
+    expect(klass.id).to eq(forum_helper.id)
+    expect(klass.system).to eq(true)
+    # tl 0 by default
+    expect(klass.allowed_group_ids).to eq([10])
+    expect(klass.user_id).to eq(1)
+    expect(klass.default_llm_id).to eq(llm_model.id)
+    expect(klass.allow_topic_mentions).to eq(true)
+    expect(klass.allow_personal_messages).to eq(true)
+    expect(klass.allow_chat_channel_mentions).to eq(true)
+    expect(klass.allow_chat_direct_messages).to eq(true)
+  end
+
+  it "defines singleton methods non agent classes" do
+    agent =
+      AiAgent.create!(
+        name: "test",
+        description: "test",
+        system_prompt: "test",
+        tools: [],
+        allowed_group_ids: [],
+        default_llm_id: llm_model.id,
+        allow_topic_mentions: true,
+        allow_personal_messages: true,
+        allow_chat_channel_mentions: true,
+        allow_chat_direct_messages: true,
+        user_id: 1,
+      )
+
+    klass = agent.class_instance
+
+    expect(klass.id).to eq(agent.id)
+    expect(klass.system).to eq(false)
+    expect(klass.allowed_group_ids).to eq([])
+    expect(klass.user_id).to eq(1)
+    expect(klass.default_llm_id).to eq(llm_model.id)
+    expect(klass.allow_topic_mentions).to eq(true)
+    expect(klass.allow_personal_messages).to eq(true)
+    expect(klass.allow_chat_channel_mentions).to eq(true)
+    expect(klass.allow_chat_direct_messages).to eq(true)
+  end
+
+  it "resolves the users tool shorthand" do
+    agent =
+      AiAgent.create!(
+        name: "users_tool_agent",
+        description: "test",
+        system_prompt: "test",
+        tools: ["Users"],
+        allowed_group_ids: [],
+        default_llm_id: llm_model.id,
+        user_id: 1,
+      )
+
+    expect(agent.class_instance.new.tools).to contain_exactly(DiscourseAi::Agents::Tools::ListUsers)
+  end
+
+  it "attaches mcp tool classes for assigned servers" do
+    ai_mcp_server = Fabricate(:ai_mcp_server, name: "Jira")
+    agent =
+      AiAgent.create!(
+        name: "mcp_agent",
+        description: "test",
+        system_prompt: "test",
+        tools: [],
+        allowed_group_ids: [],
+      )
+    agent.ai_mcp_servers << ai_mcp_server
+
+    DiscourseAi::Mcp::ToolRegistry.stubs(:tool_classes_for_servers).returns(
+      [
+        DiscourseAi::Agents::Tools::Mcp.class_instance(
+          ai_mcp_server.id,
+          "search_issues",
+          { "name" => "search_issues", "description" => "Search issues", "inputSchema" => {} },
+        ),
+      ],
+    )
+
+    klass = agent.class_instance
+
+    expect(klass.new.tools.map { |tool| tool.signature[:name] }).to include("search_issues")
+  end
+
+  it "passes selected MCP tool names to the registry" do
+    ai_mcp_server = Fabricate(:ai_mcp_server, name: "Jira")
+    agent =
+      AiAgent.create!(
+        name: "mcp_agent",
+        description: "test",
+        system_prompt: "test",
+        tools: [],
+        allowed_group_ids: [],
+      )
+    agent.ai_mcp_servers << ai_mcp_server
+    agent
+      .ai_agent_mcp_servers
+      .find_by!(ai_mcp_server_id: ai_mcp_server.id)
+      .update!(selected_tool_names: ["search_issues"])
+
+    DiscourseAi::Mcp::ToolRegistry
+      .expects(:tool_classes_for_servers)
+      .with(
+        [ai_mcp_server],
+        reserved_names: [],
+        selected_tool_names_by_server: {
+          ai_mcp_server.id => ["search_issues"],
+        },
+      )
+      .returns([])
+
+    agent.class_instance
+  end
+
+  it "allows mention modalities without a per-agent LLM" do
+    assign_fake_provider_to(:ai_default_llm_model)
+
+    %i[
+      allow_chat_channel_mentions
+      allow_chat_direct_messages
+      allow_topic_mentions
+    ].each do |modality|
+      agent = Fabricate.build(:ai_agent, name: "test_#{modality}", default_llm: nil)
+      agent.public_send("#{modality}=", true)
+
+      expect(agent).to be_valid,
+      "expected #{modality} to be valid without a per-agent language model"
+    end
+  end
+
+  it "requires a per-agent default LLM when it is forced" do
+    agent = Fabricate.build(:ai_agent, default_llm: nil, force_default_llm: true)
+
+    expect(agent).not_to be_valid
+    expect(agent.errors[:base]).to include(
+      I18n.t("discourse_ai.ai_bot.agents.forced_default_llm_required"),
+    )
+
+    agent.default_llm = llm_model
+
+    expect(agent).to be_valid
+  end
+
+  it "does not leak caches between sites" do
+    AiAgent.create!(
+      name: "pun_bot",
+      description: "you write puns",
+      system_prompt: "you are pun bot",
+      tools: ["ImageCommand"],
+      allowed_group_ids: [Group::AUTO_GROUPS[:trust_level_0]],
+    )
+
+    SiteSetting.granular_anonymous_and_logged_in_groups_permissions = false
+    AiAgent.all_agents
+
+    expect(AiAgent.agent_cache[:value_everyone_allowed].length).to be > 0
+    RailsMultisite::ConnectionManagement.stubs(:current_db) { "abc" }
+    expect(AiAgent.agent_cache[:value_everyone_allowed]).to eq(nil)
+  end
+
+  describe ".find_by_id_from_cache" do
+    fab!(:agent) do
+      AiAgent.create!(
+        name: "cached_agent",
+        description: "test agent for cache",
+        system_prompt: "you are a test",
+        tools: [],
+        allowed_group_ids: [],
+      )
+    end
+
+    it "returns nil for blank agent_id" do
+      expect(AiAgent.find_by_id_from_cache(nil)).to eq(nil)
+      expect(AiAgent.find_by_id_from_cache("")).to eq(nil)
+    end
+
+    it "finds agent by id from cache" do
+      result = AiAgent.find_by_id_from_cache(agent.id)
+      expect(result).to be_present
+      expect(result.id).to eq(agent.id)
+      expect(result.name).to eq("cached_agent")
+    end
+
+    it "finds agent when id is provided as a string" do
+      result = AiAgent.find_by_id_from_cache(agent.id.to_s)
+      expect(result).to be_present
+      expect(result.id).to eq(agent.id)
+    end
+
+    it "returns nil for non-existent agent id" do
+      result = AiAgent.find_by_id_from_cache(999_999)
+      expect(result).to eq(nil)
+    end
+
+    it "finds disabled agents" do
+      agent.update!(enabled: false)
+      result = AiAgent.find_by_id_from_cache(agent.id)
+      expect(result).to be_present
+      expect(result.id).to eq(agent.id)
+    end
+
+    it "uses cache and avoids database queries after initial load" do
+      AiAgent.find_by_id_from_cache(agent.id)
+
+      query_count = track_sql_queries { AiAgent.find_by_id_from_cache(agent.id) }.count
+
+      expect(query_count).to eq(0)
+    end
+
+    it "falls back to database when cache is cleared after initial load" do
+      result_before = AiAgent.find_by_id_from_cache(agent.id)
+      expect(result_before).to be_present
+
+      AiAgent.agent_cache.flush!
+
+      query_count =
+        track_sql_queries do
+          result_after = AiAgent.find_by_id_from_cache(agent.id)
+          expect(result_after).to be_present
+          expect(result_after.id).to eq(agent.id)
+          expect(result_after.name).to eq("cached_agent")
+        end.count
+
+      expect(query_count).to be > 0
+    end
+  end
+
+  describe "system agent validations" do
+    let(:system_agent) do
+      AiAgent.create!(
+        name: "system_agent",
+        description: "system agent",
+        system_prompt: "system agent",
+        tools: %w[Search Time],
+        response_format: [{ key: "summary", type: "string" }],
+        examples: [%w[user_msg1 assistant_msg1], %w[user_msg2 assistant_msg2]],
+        system: true,
+      )
+    end
+
+    context "when modifying a system agent" do
+      it "allows changing tool options without allowing tool additions/removals" do
+        tools = [["Search", { "base_query" => "abc" }], ["Time"]]
+        system_agent.update!(tools: tools)
+
+        system_agent.reload
+        expect(system_agent.tools).to eq(tools)
+
+        invalid_tools = ["Time"]
+        system_agent.update(tools: invalid_tools)
+        expect(system_agent.errors[:base]).to include(
+          I18n.t("discourse_ai.ai_bot.agents.cannot_edit_system_agent"),
+        )
+      end
+
+      it "doesn't accept response format changes" do
+        new_format = [{ key: "summary2", type: "string" }]
+
+        expect { system_agent.update!(response_format: new_format) }.to raise_error(
+          ActiveRecord::RecordInvalid,
+        )
+      end
+
+      it "doesn't accept additional format changes" do
+        new_format = [{ key: "summary", type: "string" }, { key: "summary2", type: "string" }]
+
+        expect { system_agent.update!(response_format: new_format) }.to raise_error(
+          ActiveRecord::RecordInvalid,
+        )
+      end
+
+      it "doesn't accept changes to examples" do
+        other_examples = [%w[user_msg1 assistant_msg1]]
+
+        expect { system_agent.update!(examples: other_examples) }.to raise_error(
+          ActiveRecord::RecordInvalid,
+        )
+      end
+    end
+  end
+
+  describe "token budget settings" do
+    it "allows an agent to use the default token budget" do
+      agent =
+        AiAgent.create!(
+          name: "token_budget_agent",
+          description: "test",
+          system_prompt: "test",
+          tools: [],
+          allowed_group_ids: [],
+        )
+
+      expect(agent.max_turn_tokens).to be_nil
+      expect(agent.compression_threshold).to eq(80)
+
+      klass = agent.class_instance
+
+      expect(klass.max_turn_tokens).to be_nil
+      expect(klass.compression_threshold).to eq(80)
+    end
+  end
+
+  describe "validates examples format" do
+    it "doesn't accept examples that are not arrays" do
+      basic_agent.examples = [1]
+
+      expect(basic_agent.valid?).to eq(false)
+      expect(basic_agent.errors[:examples].first).to eq(
+        I18n.t("discourse_ai.agents.malformed_examples"),
+      )
+    end
+
+    it "doesn't accept examples that don't come in pairs" do
+      basic_agent.examples = [%w[user_msg1]]
+
+      expect(basic_agent.valid?).to eq(false)
+      expect(basic_agent.errors[:examples].first).to eq(
+        I18n.t("discourse_ai.agents.malformed_examples"),
+      )
+    end
+
+    it "works when example is well formatted" do
+      basic_agent.examples = [%w[user_msg1 assistant1]]
+
+      expect(basic_agent.valid?).to eq(true)
+    end
+  end
+end

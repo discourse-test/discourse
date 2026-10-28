@@ -1,0 +1,9 @@
+# frozen_string_literal: true
+
+class Downloads
+  FOLDER = Rails.root.join("tmp/downloads#{ENV["TEST_ENV_NUMBER"]}")
+
+  def self.clear
+    FileUtils.rm_rf(FOLDER)
+  end
+end

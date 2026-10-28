@@ -1,0 +1,57 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+hy:
+  js:
+    styleguide:
+      example:
+        kind:
+          component: "Բաղադրիչ"
+      sections:
+        typography:
+          example: "Բարի գալուստ Discourse"
+        context_menu:
+          actions:
+            delete: "Ջնջել"
+        reorderable_list:
+          policies_pinned: "Ամրակցված"
+          policies_required: "Պարտադիր"
+          table_type: "Տիպ"
+          cross_list_primary: "Հիմնական"
+        colors:
+          title: "Գույներ"
+        icons:
+          title: "Պատկերակներ"
+        categories:
+          title: "Կատեգորիաներ"
+        navigation:
+          title: "Նավիգացիա"
+        categories_list:
+          title: "Կատեգորիաների Ցանկ"
+        topic_timer_info:
+          title: "Թեմաների Ժամաչափիչներ"
+        post:
+          title: "Գրառում"
+        more_topics:
+          title: "Ավելի Շատ Թեմաներ"
+        roving_focus:
+          toolbar:
+            copy: "Կրկնօրինակել"
+          adjacent:
+            label: "Ֆիլտրներ"
+            field: "Որոնում"
+            open: "Բացել"
+            recent: "Վերջին "
+          combobox:
+            daily: "Օրվա Ընթացքում"
+            weekly: "Շաբաթվա Ընթացքում"
+            monthly: "Ամսվա Ընթացքում"
+            never: "Երբեք"
+          tree:
+            components: "Բաղադրիչներ"
+        tooltips:
+          description: "Նկարագրությունը"
+          header: "Վերնամաս"

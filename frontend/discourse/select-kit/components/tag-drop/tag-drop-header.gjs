@@ -1,0 +1,25 @@
+import { classNames } from "@ember-decorators/component";
+import ComboBoxSelectBoxHeaderComponent from "discourse/select-kit/components/combo-box/combo-box-header";
+import { resolveComponent } from "discourse/select-kit/components/select-kit";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+
+@classNames("tag-drop-header")
+export default class TagDropHeader extends ComboBoxSelectBoxHeaderComponent {
+  <template>
+    <div class="select-kit-header-wrapper">
+      {{#let
+        (resolveComponent this this.selectKit.options.selectedNameComponent)
+        as |SelectedNameComponent|
+      }}
+        <SelectedNameComponent
+          @item={{this.selectedContent}}
+          @selectKit={{this.selectKit}}
+          @shouldDisplayClearableButton={{this.shouldDisplayClearableButton}}
+          @tabindex={{this.tabindex}}
+        />
+      {{/let}}
+
+      {{dIcon this.caretIcon class="angle-icon"}}
+    </div>
+  </template>
+}

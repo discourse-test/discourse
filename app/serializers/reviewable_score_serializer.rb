@@ -1,0 +1,197 @@
+# frozen_string_literal: true
+
+class ReviewableScoreSerializer < ApplicationSerializer
+  REASON_COOK_OPTIONS = {
+    features_override: [].freeze,
+    markdown_it_rules: %w[
+      autolink
+      list
+      backticks
+      newline
+      code
+      fence
+      linkify
+      link
+      strikethrough
+      blockquote
+      emphasis
+      escape
+      entity
+      html_block
+      html_inline
+    ].freeze,
+  }.freeze
+
+  REASONS_AND_SETTINGS = {
+    post_count: "approve_post_count",
+    trust_level: "approve_unless_trust_level",
+    group: "approve_unless_allowed_groups",
+    new_topics_unless_trust_level: "approve_new_topics_unless_trust_level",
+    new_topics_unless_allowed_groups: "approve_new_topics_unless_allowed_groups",
+    fast_typer: "first_post_typing_time",
+    auto_silence_regex: "auto_silence_first_post_regex",
+    staged: "approve_unless_staged",
+    must_approve_users: "must_approve_users",
+    invite_only: "invite_only",
+    email_spam: "email_in_spam_header",
+    suspect_user: "approve_suspect_users",
+    contains_media: "skip_review_media_groups",
+  }
+
+  attributes :id,
+             :score,
+             :agree_stats,
+             :reason,
+             :reason_type,
+             :reason_data,
+             :created_at,
+             :reviewed_at
+
+  attribute :status_for_database, key: :status
+
+  has_one :user, serializer: BasicUserSerializer, root: "users"
+  has_one :score_type, serializer: ReviewableScoreTypeSerializer
+  has_one :reviewable_conversation, serializer: ReviewableConversationSerializer
+  has_one :reviewed_by, serializer: BasicUserSerializer, root: "users"
+
+  def include_reviewable_conversation?
+    return false if object.meta_topic.blank?
+    if object.meta_topic.private_message? && @options[:include_private_conversations] == false
+      return false
+    end
+    scope&.can_see?(object.meta_topic) || object.notify_moderators_flag_message?
+  end
+
+  def agree_stats
+    {
+      agreed: user.user_stat.flags_agreed,
+      disagreed: user.user_stat.flags_disagreed,
+      ignored: user.user_stat.flags_ignored,
+    }
+  end
+
+  def reason
+    return @reason if defined?(@reason)
+    return unless object.reason
+
+    link_text = setting_name_for_reason(object.reason)
+    link_text = I18n.t("reviewables.reasons.links.#{object.reason}", default: nil) if link_text.nil?
+
+    if link_text
+      link = build_link_for(object.reason, link_text)
+
+      if object.reason == "watched_word"
+        return @reason = PrettyText.sanitize("<p>#{watched_word_reason(link)}</p>")
+      end
+
+      text =
+        if object.reason == "fast_typer"
+          fast_typer_reason(link)
+        else
+          I18n.t("reviewables.reasons.#{object.reason}", link:, default: object.reason)
+        end
+    else
+      text = I18n.t("reviewables.reasons.#{object.reason}", default: object.reason)
+    end
+
+    @reason = PrettyText.cook(text, REASON_COOK_OPTIONS)
+  end
+
+  def reason_type
+    object.reason
+  end
+
+  def reason_data
+    watched_words_found if object.reason == "watched_word"
+  end
+
+  def include_reason?
+    reason.present?
+  end
+
+  def setting_name_for_reason(reason)
+    setting_name = REASONS_AND_SETTINGS[reason.to_sym]
+
+    if setting_name.nil?
+      plugin_options = DiscoursePluginRegistry.reviewable_score_links
+      option = plugin_options.detect { |o| o[:reason] == reason.to_sym }
+
+      setting_name = option[:setting] if option
+    end
+
+    setting_name
+  end
+
+  private
+
+  def fast_typer_reason(link)
+    typing_time = fast_typer_typing_time
+    if typing_time.blank?
+      return I18n.t("reviewables.reasons.fast_typer", link:, default: object.reason)
+    end
+
+    I18n.t("reviewables.reasons.fast_typer_with_time", link:, typing_time:, default: object.reason)
+  end
+
+  def fast_typer_typing_time
+    msecs = object.reviewable.payload&.dig("typing_duration_msecs")
+    return if msecs.blank?
+
+    count = msecs.to_i.fdiv(1000).round(1)
+    count = count.to_i if count == count.to_i
+    I18n.t("reviewables.reasons.fast_typer_time", count:)
+  end
+
+  def watched_word_reason(link)
+    words = watched_words_found
+    default = "watched_word"
+
+    if words.nil? || words.empty?
+      I18n.t("reviewables.reasons.no_context.watched_word", link:, default:)
+    else
+      I18n.t(
+        "reviewables.reasons.watched_word",
+        link:,
+        words: words.map { |word| CGI.escapeHTML(word) }.join(", "),
+        count: words.size,
+        default:,
+      )
+    end
+  end
+
+  def watched_words_found
+    if object.context.nil?
+      # If the words weren't recorded, try to guess them based on current settings.
+      if object.reviewable.respond_to?(:post)
+        s = object.reviewable.post.raw.clone
+        s << " #{object.reviewable.post.topic.title}" if object.reviewable.post.post_number == 1
+      elsif object.reviewable.respond_to?(:payload)
+        s = object.reviewable.payload["raw"].clone
+        s << " #{object.reviewable.payload["title"]}" if object.reviewable.payload.key?("title")
+      end
+
+      words = WordWatcher.new(s).word_matches_across_all_actions
+    else
+      words = object.context.split(",")
+    end
+
+    words.map(&:downcase).uniq
+  end
+
+  def url_for(reason, text)
+    case reason
+    when "watched_word"
+      "#{Discourse.base_url}/admin/customize/watched_words"
+    when "category"
+      "#{Discourse.base_url}/c/#{object.reviewable.category&.slug}/edit/settings"
+    else
+      "#{Discourse.base_url}/admin/site_settings/category/all_results?filter=#{text}"
+    end
+  end
+
+  def build_link_for(reason, text)
+    return text.gsub("_", " ") unless scope.is_staff?
+
+    "<a href=\"#{url_for(reason, text)}\">#{text.gsub("_", " ")}</a>"
+  end
+end

@@ -1,0 +1,495 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+require "open3"
+require "pathname"
+require "shellwords"
+
+PROJECT_ROOT = File.expand_path("..", __dir__)
+PROJECT_ROOT_PATH = Pathname.new(PROJECT_ROOT)
+PROJECT_ROOT_REALPATH = PROJECT_ROOT_PATH.realpath
+INVOCATION_PWD = Dir.pwd
+
+LintAborted = Class.new(StandardError)
+
+module Logging
+  def log(message)
+    puts "[bin/lint] #{message}"
+  end
+
+  def debug(message)
+    puts message if @verbose
+  end
+end
+
+module ArgumentBatcher
+  MAX_ARGV_BYTES = 100_000
+
+  def self.batches(files, per_file_overhead: 1)
+    batches = [[]]
+    size = 0
+
+    files.each do |file|
+      entry = file.bytesize + per_file_overhead
+
+      if size + entry > MAX_ARGV_BYTES && batches.last.any?
+        batches << []
+        size = 0
+      end
+
+      batches.last << file
+      size += entry
+    end
+
+    batches
+  end
+end
+
+class ExternalLinter
+  include Logging
+
+  RUBY_EXTENSIONS = %w[rb rake thor].freeze
+  PRETTIER_EXTENSIONS = %w[css scss js gjs cjs mjs ts gts mts cts].freeze
+  ESLINT_EXTENSIONS = %w[js gjs cjs mjs ts gts mts cts].freeze
+  STYLELINT_EXTENSIONS = %w[scss].freeze
+  JS_EXTENSIONS = (PRETTIER_EXTENSIONS + ESLINT_EXTENSIONS + STYLELINT_EXTENSIONS).uniq.freeze
+
+  PNPM = %w[pnpm --ignore-workspace].freeze
+  JS_LINTERS = [
+    ["prettier", PRETTIER_EXTENSIONS, %w[--write], %w[--list-different]],
+    ["eslint", ESLINT_EXTENSIONS, %w[--fix], %w[--quiet]],
+    ["stylelint", STYLELINT_EXTENSIONS, %w[--fix], []],
+  ].freeze
+
+  attr_reader :results
+
+  def initialize(root, files, fix:, verbose: false)
+    root_path = Pathname.new(root).realpath
+
+    @root = root
+    @files = files.map { |file| Pathname.new(file).realpath.relative_path_from(root_path).to_s }
+    @fix = fix
+    @verbose = verbose
+    @results = []
+  end
+
+  def run
+    ruby_files = @files.select { |file| ruby_file?(file) }
+    js_files = @files.select { |file| extension_in?(file, JS_EXTENSIONS) }
+
+    skipped = @files - ruby_files - js_files
+    log "No external-plugin linter for: #{skipped.join(", ")}" if skipped.any?
+
+    run_ruby_linters(ruby_files) if ruby_files.any?
+    run_js_linters(js_files) if js_files.any?
+  end
+
+  private
+
+  def extension_in?(file, extensions)
+    extensions.include?(File.extname(file)[1..])
+  end
+
+  def ruby_file?(file)
+    extension_in?(file, RUBY_EXTENSIONS) || File.basename(file) == "Gemfile"
+  end
+
+  def run_cmd(*cmd, env: {})
+    debug "Running: #{cmd.shelljoin} (cwd: #{@root})"
+    system(env, *cmd, chdir: @root)
+  end
+
+  def run_linter(name, *cmd)
+    log "Running #{name}..."
+    @results << [name, run_cmd(*cmd)]
+  end
+
+  def run_ruby_linters(files)
+    log "Installing bundler dependencies in #{@root}..."
+    frozen = @fix ? {} : { "BUNDLE_FROZEN" => "true" }
+    return @results << ["bundle install", false] unless run_cmd("bundle", "install", env: frozen)
+
+    ArgumentBatcher
+      .batches(files)
+      .each do |batch|
+        run_linter("stree", "bundle", "exec", "stree", @fix ? "write" : "check", *batch)
+      end
+    ArgumentBatcher
+      .batches(files)
+      .each do |batch|
+        run_linter("rubocop", "bundle", "exec", "rubocop", *(@fix ? ["--autocorrect"] : []), *batch)
+      end
+  end
+
+  def run_js_linters(files)
+    log "Installing pnpm dependencies in #{@root}..."
+    frozen = @fix ? [] : ["--frozen-lockfile"]
+    return @results << ["pnpm install", false] unless run_cmd(*PNPM, "i", *frozen)
+
+    JS_LINTERS.each do |name, extensions, fix_args, check_args|
+      matching = files.select { |file| extension_in?(file, extensions) }
+      next if matching.empty?
+
+      ArgumentBatcher
+        .batches(matching)
+        .each { |batch| run_linter(name, *PNPM, name, *(@fix ? fix_args : check_args), *batch) }
+    end
+  end
+end
+
+class LefthookLinter
+  include Logging
+
+  EVERYTHING = ["ALL FILES"].freeze
+  SELECTORS = %i[recent staged unstaged wip].freeze
+
+  SKIPPED_PATHS = %w[config/database.yml].freeze
+  SKIPPED_SEGMENTS = %w[node_modules vendor tmp .git].freeze
+  LINTABLE_EXTENSIONS = %w[
+    rb
+    rake
+    thor
+    js
+    gjs
+    cjs
+    mjs
+    ts
+    gts
+    mts
+    cts
+    hbs
+    scss
+    css
+    yml
+    yaml
+    md
+    json
+  ].freeze
+  RUBY_SHEBANG = "#!/usr/bin/env ruby"
+
+  CORE_FRONTEND_PATHS = %w[frontend/ plugins/ themes/].freeze
+  CORE_STYLESHEET_PATHS = %w[app/assets/stylesheets/].freeze
+  DEVELOPER_DOCS_PATH = "docs/developer-guides/"
+  DEVELOPER_DOCS_EXTENSIONS = %w[md json mjs yml].freeze
+
+  FILE_FLAG_BYTES = "--file".bytesize + 2
+
+  def initialize(options = {})
+    @fix = options[:fix]
+    @verbose = options[:verbose]
+    @files = options[:files] || []
+    @selector = SELECTORS.find { |name| options[name] }
+    @results = []
+  end
+
+  def run
+    lint(determine_files)
+    print_summary
+
+    @results.all? { |_, ok| ok }
+  rescue LintAborted => e
+    warn "[bin/lint] #{e.message}"
+    false
+  end
+
+  private
+
+  def lint(files)
+    return run_lefthook(@fix ? "fix-all" : "lints", []) if files.equal?(EVERYTHING)
+    return if files.empty?
+
+    core, external = partition_files(files)
+    core, skipped = core.partition { |file| core_lintable_file?(file) }
+
+    log "No core linter for: #{skipped.join(", ")}" if skipped.any?
+    run_lefthook(hook, core) if core.any?
+    external.each { |root, paths| run_external(root, paths) }
+  end
+
+  def hook
+    if @selector == :staged
+      @fix ? "fix-staged" : "pre-commit"
+    else
+      @fix ? "fix-files" : "lint-files"
+    end
+  end
+
+  def print_summary
+    failed = @results.reject { |_, ok| ok }
+
+    if failed.any?
+      failed.each { |name, _| log "#{name} failed" }
+    elsif @results.empty?
+      log "Nothing was linted"
+    else
+      log "All lints passed"
+    end
+  end
+
+  def determine_files
+    return EVERYTHING if @selector.nil? && @files.empty?
+
+    if @selector && @files.any?
+      warn "[bin/lint] Ignoring file arguments: a selector flag takes precedence"
+    end
+
+    resolved = source_paths.map { |path| resolve_path(path) }
+    files = resolved.flat_map(&:first).uniq
+
+    if @selector.nil?
+      resolved.filter_map(&:last).each { |problem| warn "[bin/lint] Skipping #{problem}" }
+      raise LintAborted, "Nothing to lint" if files.empty?
+    end
+
+    files
+  end
+
+  def source_paths
+    return source_files if @selector
+
+    @files.map { |file| normalize_relative_path(file) }
+  end
+
+  def source_files
+    case @selector
+    when :recent
+      recent_files
+    when :staged
+      staged_files
+    when :unstaged
+      unstaged_files
+    when :wip
+      wip_files
+    else
+      @files
+    end
+  end
+
+  def resolve_path(path)
+    if File.directory?(path)
+      expanded = expand_directory(path)
+      return expanded, expanded.empty? ? "#{path}: no lintable files" : nil
+    end
+
+    return [], "#{path}: does not exist" unless File.file?(path)
+    return [], "#{path}: not a lintable file type" unless lintable_file?(path)
+
+    [[path], nil]
+  end
+
+  def expand_directory(path)
+    files =
+      git_lines(
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        path,
+        on_failure: :ignore,
+      )
+    files = [path] if files.empty?
+
+    files
+      .flat_map { |file| File.directory?(file) ? Dir.glob(File.join(file, "**", "*")) : file }
+      .select { |file| File.file?(file) && lintable_file?(file) }
+  end
+
+  def git_lines(*args, on_failure: :abort)
+    output, error, status = Open3.capture3("git", *args)
+    return output.lines.map(&:strip).reject(&:empty?) if status.success?
+    return [] if on_failure == :ignore
+
+    raise LintAborted, "git #{args.first} failed: #{error.lines.first&.strip}"
+  end
+
+  def recent_files
+    git_lines("log", "-50", "--name-only", "--pretty=format:") +
+      git_lines("ls-files", "--others", "--exclude-standard") + staged_files + unstaged_files
+  end
+
+  def staged_files
+    git_lines("diff", "--cached", "--name-only")
+  end
+
+  def unstaged_files
+    git_lines("diff", "--name-only")
+  end
+
+  def wip_files
+    git_lines("diff", "main...HEAD", "--name-only") + staged_files + unstaged_files
+  end
+
+  def core_lintable_file?(file)
+    return false if outside_project?(file)
+    return true if file == "Gemfile"
+
+    extension = File.extname(file)[1..]
+    return ruby_script?(file) if extension.nil? || extension.empty?
+    return true if ExternalLinter::RUBY_EXTENSIONS.include?(extension)
+    return true if %w[yml yaml].include?(extension)
+
+    if file.start_with?(DEVELOPER_DOCS_PATH)
+      return true if DEVELOPER_DOCS_EXTENSIONS.include?(extension)
+    end
+
+    return false unless ExternalLinter::JS_EXTENSIONS.include?(extension)
+
+    paths = CORE_FRONTEND_PATHS
+    paths += CORE_STYLESHEET_PATHS if %w[css scss].include?(extension)
+    paths.any? { |path| file.start_with?(path) }
+  end
+
+  def lintable_file?(file)
+    return false if skipped_project_path?(file)
+    return true if File.basename(file) == "Gemfile"
+
+    extension = File.extname(file)[1..]
+    return ruby_script?(file) if extension.nil? || extension.empty?
+
+    LINTABLE_EXTENSIONS.include?(extension)
+  end
+
+  def outside_project?(file)
+    file.start_with?("../")
+  end
+
+  def skipped_project_path?(file)
+    return false if outside_project?(file)
+    return true if SKIPPED_PATHS.include?(file)
+
+    file.split("/").any? { |segment| SKIPPED_SEGMENTS.include?(segment) }
+  end
+
+  def ruby_script?(file)
+    return false unless file.start_with?("bin/") && File.file?(file)
+
+    File.open(file, &:readline).strip == RUBY_SHEBANG
+  rescue StandardError
+    false
+  end
+
+  def partition_files(files)
+    grouped = files.group_by { |file| external_plugin_root(file) }
+
+    [grouped.delete(nil) || [], grouped]
+  end
+
+  def external_plugin_root(file)
+    return standalone_plugin_root(file) if outside_project?(file)
+    return nil unless file.start_with?("plugins/")
+
+    parts = file.split("/")
+    return nil if parts.length < 2
+
+    plugin_dir = "plugins/#{parts[1]}"
+    return nil if bundled_plugins.include?(plugin_dir)
+
+    File.join(PROJECT_ROOT, plugin_dir)
+  end
+
+  def standalone_plugin_root(file)
+    path = Pathname.new(file).realpath
+    return nil if path.to_s.start_with?("#{PROJECT_ROOT_REALPATH}#{File::SEPARATOR}")
+
+    path.ascend.find { |dir| dir.join("plugin.rb").file? }&.to_s
+  end
+
+  def bundled_plugins
+    @bundled_plugins ||=
+      begin
+        output, status = Open3.capture2(File.join(PROJECT_ROOT, "script", "list_bundled_plugins"))
+        raise LintAborted, "Failed to list bundled plugins" unless status.success?
+
+        Set.new(output.lines.map(&:strip).reject(&:empty?))
+      end
+  end
+
+  def run_external(root, files)
+    linter = ExternalLinter.new(root, files, fix: @fix, verbose: @verbose)
+    linter.run
+
+    relative = Pathname.new(root).relative_path_from(PROJECT_ROOT_PATH)
+    linter.results.each { |name, ok| @results << ["#{name} (#{relative})", ok] }
+  end
+
+  def run_lefthook(hook, files)
+    log "Running core linters via lefthook..."
+
+    outcomes =
+      ArgumentBatcher
+        .batches(files, per_file_overhead: FILE_FLAG_BYTES)
+        .map do |batch|
+          cmd = ["pnpm", "lefthook", "run", hook]
+          batch.each { |file| cmd << "--file" << file }
+          cmd << "--verbose" if @verbose
+
+          debug "Running: #{cmd.shelljoin}"
+          system({ "LEFTHOOK" => "1" }, *cmd)
+        end
+
+    @results << ["core linters", outcomes.all?]
+  end
+
+  def normalize_relative_path(file)
+    absolute = File.expand_path(file, INVOCATION_PWD)
+    Pathname.new(absolute).relative_path_from(PROJECT_ROOT_PATH).to_s
+  rescue ArgumentError
+    file
+  end
+end
+
+def parse_options
+  options = {}
+
+  OptionParser
+    .new do |parser|
+      parser.banner = "Usage: bin/lint [options] [files|directories...]"
+
+      parser.on("-h", "--help", "Show this help message") do
+        puts parser
+        puts
+        puts "Examples:"
+        puts "  bin/lint                        # Lint all files"
+        puts "  bin/lint --recent               # Lint recently changed files"
+        puts "  bin/lint --staged               # Lint only staged files"
+        puts "  bin/lint --unstaged             # Lint only unstaged files"
+        puts "  bin/lint --wip                  # Lint staged + unstaged + files changed since main"
+        puts "  bin/lint --fix app.rb file2.js  # Fix specific file/s"
+        puts "  bin/lint app/models/*.rb        # Lint multiple files"
+        puts "  bin/lint frontend/discourse/app/ # Lint all lintable files in directory"
+        puts
+        puts "Linters are configured in lefthook.yml."
+        exit
+      end
+
+      parser.on("-f", "--fix", "Attempt to automatically fix issues") { options[:fix] = true }
+
+      parser.on("-r", "--recent", "Lint recently changed files (last 50 commits)") do
+        options[:recent] = true
+      end
+
+      parser.on("--staged", "Lint only staged files") { options[:staged] = true }
+
+      parser.on("--unstaged", "Lint only unstaged files") { options[:unstaged] = true }
+
+      parser.on("--wip", "Lint work-in-progress: staged + unstaged + files changed since main") do
+        options[:wip] = true
+      end
+
+      parser.on("-v", "--verbose", "Show verbose output") { options[:verbose] = true }
+    end
+    .parse!
+
+  options[:files] = ARGV unless ARGV.empty?
+  options
+rescue OptionParser::ParseError => e
+  abort "[bin/lint] #{e.message}\nRun `bin/lint --help` for usage."
+end
+
+if __FILE__ == $0
+  options = parse_options
+  Dir.chdir(PROJECT_ROOT) # rubocop:disable Discourse/NoChdir
+  exit 1 unless LefthookLinter.new(options).run
+end

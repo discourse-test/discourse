@@ -1,0 +1,72 @@
+# frozen_string_literal: true
+
+RSpec.describe Jobs::CreateUserReviewable do
+  let(:user) { Fabricate(:user) }
+
+  it "creates the reviewable" do
+    SiteSetting.must_approve_users = true
+    described_class.new.execute(user_id: user.id)
+
+    reviewable = Reviewable.find_by(target: user)
+    expect(reviewable).to be_present
+    expect(reviewable.pending?).to eq(true)
+    expect(reviewable.payload["username"]).to eq(user.username)
+    expect(reviewable.payload["name"]).to eq(user.name)
+    expect(reviewable.payload["email"]).to eq(user.email)
+  end
+
+  it "does not raise an error when a reviewable already exists" do
+    SiteSetting.must_approve_users = true
+    described_class.new.execute(user_id: user.id)
+    described_class.new.execute(user_id: user.id)
+
+    reviewable = Reviewable.find_by(target: user)
+    expect(reviewable.reviewable_scores.size).to eq(1)
+  end
+
+  it "re-queues a returning user with the current email and a new score" do
+    SiteSetting.must_approve_users = true
+    described_class.new.execute(user_id: user.id)
+    reviewable = Reviewable.find_by(target: user)
+    reviewable.transition_to(:rejected, Discourse.system_user)
+    user.primary_email.update!(email: "replacement@example.com")
+
+    events =
+      DiscourseEvent.track_events(:reviewable_transitioned_to) do
+        described_class.new.execute(user_id: user.id)
+      end
+
+    expect(events.map { |event| event[:params].last.payload["email"] }).to eq(
+      ["replacement@example.com"],
+    )
+    expect(reviewable.reload).to be_pending
+    expect(reviewable.reviewable_scores.pending.map(&:reviewable_score_type)).to eq(
+      [ReviewableScore.types[:needs_approval]],
+    )
+  end
+
+  describe "reasons" do
+    it "does nothing if there's no reason" do
+      described_class.new.execute(user_id: user.id)
+      expect(Reviewable.find_by(target: user)).to be_blank
+    end
+
+    it "adds must_approve_users if enabled" do
+      SiteSetting.must_approve_users = true
+      described_class.new.execute(user_id: user.id)
+      reviewable = Reviewable.find_by(target: user)
+      score = reviewable.reviewable_scores.first
+      expect(score).to be_present
+      expect(score.reason).to eq("must_approve_users")
+    end
+
+    it "adds invite_only if enabled" do
+      SiteSetting.invite_only = true
+      described_class.new.execute(user_id: user.id)
+      reviewable = Reviewable.find_by(target: user)
+      score = reviewable.reviewable_scores.first
+      expect(score).to be_present
+      expect(score.reason).to eq("invite_only")
+    end
+  end
+end

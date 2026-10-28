@@ -1,0 +1,358 @@
+import Component from "@glimmer/component";
+import { fn } from "@ember/helper";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import UppyImageUploader from "discourse/components/uppy-image-uploader";
+import lazyHash from "discourse/helpers/lazy-hash";
+import { CATEGORY_TEXT_COLORS } from "discourse/lib/constants";
+import { applyMutableValueTransformer } from "discourse/lib/transformer";
+import { i18n } from "discourse-i18n";
+
+function withStoredValue(options, storedValue) {
+  if (!storedValue || options.some((o) => o.value === storedValue)) {
+    return options;
+  }
+
+  return [...options, { name: storedValue, value: storedValue }];
+}
+
+export default class UpsertCategoryAppearance extends Component {
+  @service site;
+
+  get isDefaultSortOrder() {
+    return !this.args.transientData?.sort_order;
+  }
+
+  get backgroundImageUrl() {
+    return this.args.transientData?.uploaded_background?.url ?? "";
+  }
+
+  get backgroundDarkImageUrl() {
+    return this.args.transientData?.uploaded_background_dark?.url ?? "";
+  }
+
+  get logoImageUrl() {
+    return this.args.transientData?.uploaded_logo?.url ?? "";
+  }
+
+  get logoDarkImageUrl() {
+    return this.args.transientData?.uploaded_logo_dark?.url ?? "";
+  }
+
+  get isParentCategory() {
+    const parentCategoryId =
+      this.args.transientData?.parent_category_id ??
+      this.args.category.parent_category_id;
+    return this.args.category.isParent || !parentCategoryId;
+  }
+
+  get subcategoryListStyles() {
+    const styles = [
+      { name: i18n("category.subcategory_list_styles.rows"), value: "rows" },
+      {
+        name: i18n(
+          "category.subcategory_list_styles.rows_with_featured_topics"
+        ),
+        value: "rows_with_featured_topics",
+      },
+      {
+        name: i18n("category.subcategory_list_styles.boxes"),
+        value: "boxes",
+      },
+      {
+        name: i18n(
+          "category.subcategory_list_styles.boxes_with_featured_topics"
+        ),
+        value: "boxes_with_featured_topics",
+      },
+    ];
+
+    return withStoredValue(styles, this.args.category.subcategory_list_style);
+  }
+
+  get availableViews() {
+    const views = ["hot", "latest", "top"].map((value) => ({
+      name: i18n(`filters.${value}.title`),
+      value,
+    }));
+
+    const context = {
+      categoryId: this.args.category.id,
+      customFields: this.args.category.custom_fields,
+    };
+
+    return withStoredValue(
+      applyMutableValueTransformer("category-available-views", views, context),
+      this.args.category.default_view
+    );
+  }
+
+  get topPeriods() {
+    return this.site.periods.map((value) => ({
+      name: i18n(`filters.top.${value}.title`),
+      value,
+    }));
+  }
+
+  get listFilters() {
+    const filters = ["all", "none"].map((value) => ({
+      name: i18n(`category.list_filters.${value}`),
+      value,
+    }));
+
+    return withStoredValue(filters, this.args.category.default_list_filter);
+  }
+
+  get sortOrders() {
+    const orders = applyMutableValueTransformer("category-sort-orders", [
+      "likes",
+      "op_likes",
+      "views",
+      "posts",
+      "activity",
+      "posters",
+      "category",
+      "created",
+    ])
+      .map((s) => ({ name: i18n("category.sort_options." + s), value: s }))
+      .toSorted((a, b) => a.name.localeCompare(b.name));
+
+    return withStoredValue(orders, this.args.category.sort_order);
+  }
+
+  get sortAscendingOptions() {
+    return [
+      { name: i18n("category.sort_ascending"), value: true },
+      { name: i18n("category.sort_descending"), value: false },
+    ];
+  }
+
+  /** Converts the native select's string value back to the boolean option value. */
+  @action
+  async onSortAscendingSet(value, { name, set }) {
+    await set(name, value === null ? null : value === "true");
+  }
+
+  @action
+  async onSortOrderSet(value, { name, set }) {
+    await set(name, value);
+
+    if (!value) {
+      await set("sort_ascending", null);
+    }
+  }
+
+  @action
+  onUploadDone(field, upload) {
+    this.args.form.set(field, { url: upload.url, id: upload.id });
+  }
+
+  @action
+  onUploadDeleted(field) {
+    this.args.form.set(field, { id: null, url: null });
+  }
+
+  <template>
+    <@form.Container
+      @format="full"
+      @subtitle={{i18n "category.logo_description"}}
+      @title={{i18n "category.logo"}}
+    >
+      <UppyImageUploader
+        class="no-repeat contain-image"
+        @id="category-logo-uploader"
+        @imageUrl={{this.logoImageUrl}}
+        @onUploadDeleted={{fn this.onUploadDeleted "uploaded_logo"}}
+        @onUploadDone={{fn this.onUploadDone "uploaded_logo"}}
+        @type="category_logo"
+      />
+    </@form.Container>
+
+    <@form.Container
+      @format="full"
+      @subtitle={{i18n "category.logo_description"}}
+      @title={{i18n "category.logo_dark"}}
+    >
+      <UppyImageUploader
+        class="no-repeat contain-image"
+        @id="category-dark-logo-uploader"
+        @imageUrl={{this.logoDarkImageUrl}}
+        @onUploadDeleted={{fn this.onUploadDeleted "uploaded_logo_dark"}}
+        @onUploadDone={{fn this.onUploadDone "uploaded_logo_dark"}}
+        @type="category_logo_dark"
+      />
+    </@form.Container>
+
+    <@form.Container @format="full" @title={{i18n "category.background_image"}}>
+      <UppyImageUploader
+        @id="category-background-uploader"
+        @imageUrl={{this.backgroundImageUrl}}
+        @onUploadDeleted={{fn this.onUploadDeleted "uploaded_background"}}
+        @onUploadDone={{fn this.onUploadDone "uploaded_background"}}
+        @type="category_background"
+      />
+    </@form.Container>
+
+    <@form.Container
+      @format="full"
+      @title={{i18n "category.background_image_dark"}}
+    >
+      <UppyImageUploader
+        @id="category-dark-background-uploader"
+        @imageUrl={{this.backgroundDarkImageUrl}}
+        @onUploadDeleted={{fn this.onUploadDeleted "uploaded_background_dark"}}
+        @onUploadDone={{fn this.onUploadDone "uploaded_background_dark"}}
+        @type="category_background_dark"
+      />
+    </@form.Container>
+
+    <@form.Field
+      @format="max"
+      @name="text_color"
+      @title={{i18n "category.foreground_color"}}
+      @type="color"
+      as |field|
+    >
+      <field.Control @colors={{CATEGORY_TEXT_COLORS}} />
+    </@form.Field>
+
+    <@form.Field
+      @format="max"
+      @name="default_view"
+      @title={{i18n "category.default_view"}}
+      @type="select"
+      as |field|
+    >
+      <field.Control
+        @nonePlaceholder={{i18n "category.sort_options.default"}}
+        as |select|
+      >
+        {{#each this.availableViews as |availableView|}}
+          <select.Option
+            @value={{availableView.value}}
+          >{{availableView.name}}</select.Option>
+        {{/each}}
+      </field.Control>
+    </@form.Field>
+
+    <@form.Field
+      @format="max"
+      @name="default_top_period"
+      @title={{i18n "category.default_top_period"}}
+      @type="select"
+      as |field|
+    >
+      <field.Control
+        @nonePlaceholder={{i18n "category.sort_options.default"}}
+        as |select|
+      >
+        {{#each this.topPeriods as |period|}}
+          <select.Option @value={{period.value}}>{{period.name}}</select.Option>
+        {{/each}}
+      </field.Control>
+    </@form.Field>
+
+    <@form.Field
+      @format="max"
+      @name="sort_order"
+      @onSet={{this.onSortOrderSet}}
+      @title={{i18n "category.sort_order"}}
+      @type="select"
+      as |field|
+    >
+      <field.Control
+        @nonePlaceholder={{i18n "category.sort_options.default"}}
+        as |select|
+      >
+        {{#each this.sortOrders as |sort|}}
+          <select.Option @value={{sort.value}}>{{sort.name}}</select.Option>
+        {{/each}}
+      </field.Control>
+    </@form.Field>
+
+    {{#unless this.isDefaultSortOrder}}
+      <@form.Field
+        @format="max"
+        @name="sort_ascending"
+        @onSet={{this.onSortAscendingSet}}
+        @title={{i18n "category.sort_direction"}}
+        @type="select"
+        as |field|
+      >
+        <field.Control
+          @nonePlaceholder={{i18n "category.sort_options.default"}}
+          as |select|
+        >
+          {{#each this.sortAscendingOptions as |option|}}
+            <select.Option
+              @value={{option.value}}
+            >{{option.name}}</select.Option>
+          {{/each}}
+        </field.Control>
+      </@form.Field>
+    {{/unless}}
+
+    <@form.Field
+      @format="max"
+      @name="default_list_filter"
+      @title={{i18n "category.default_list_filter"}}
+      @type="select"
+      as |field|
+    >
+      <field.Control
+        @nonePlaceholder={{i18n "category.sort_options.default"}}
+        as |select|
+      >
+        {{#each this.listFilters as |filter|}}
+          <select.Option @value={{filter.value}}>{{filter.name}}</select.Option>
+        {{/each}}
+      </field.Control>
+    </@form.Field>
+
+    {{#if this.isParentCategory}}
+      <@form.Field
+        @format="max"
+        @name="show_subcategory_list"
+        @title={{i18n "category.show_subcategory_list"}}
+        @type="checkbox"
+        as |field|
+      >
+        <field.Control />
+      </@form.Field>
+
+      {{#if @transientData.show_subcategory_list}}
+        <@form.Field
+          @format="max"
+          @name="subcategory_list_style"
+          @title={{i18n "category.subcategory_list_style"}}
+          @type="select"
+          as |field|
+        >
+          <field.Control @includeNone={{false}} as |select|>
+            {{#each this.subcategoryListStyles as |style|}}
+              <select.Option
+                @value={{style.value}}
+              >{{style.name}}</select.Option>
+            {{/each}}
+          </field.Control>
+        </@form.Field>
+      {{/if}}
+    {{/if}}
+
+    <@form.Field
+      @format="max"
+      @name="read_only_banner"
+      @title={{i18n "category.read_only_banner"}}
+      @type="input"
+      as |field|
+    >
+      <field.Control @maxlength="255" />
+    </@form.Field>
+
+    <PluginOutlet
+      @name="category-custom-images"
+      @outletArgs={{lazyHash category=@category form=@form}}
+    />
+  </template>
+}

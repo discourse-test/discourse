@@ -1,0 +1,70 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { action } from "@ember/object";
+import ChooseTopic from "discourse/components/choose-topic";
+import { ajax } from "discourse/lib/ajax";
+import { popupAjaxError } from "discourse/lib/ajax-error";
+import DButton from "discourse/ui-kit/d-button";
+import DModal from "discourse/ui-kit/d-modal";
+import { i18n } from "discourse-i18n";
+
+export default class FeatureTopicOnProfile extends Component {
+  /** @type {import("discourse/models/topic").default | null} */
+  @tracked newFeaturedTopic = null;
+  @tracked saving = false;
+
+  get noTopicSelected() {
+    return !this.newFeaturedTopic;
+  }
+
+  @action
+  async save() {
+    try {
+      this.saving = true;
+      await ajax(`/u/${this.args.model.user.username}/feature-topic`, {
+        type: "PUT",
+        data: { topic_id: this.newFeaturedTopic.id },
+      });
+
+      this.args.model.setFeaturedTopic(this.newFeaturedTopic);
+      this.args.closeModal();
+    } catch (error) {
+      popupAjaxError(error);
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  @action
+  newTopicSelected(topic) {
+    this.newFeaturedTopic = topic;
+  }
+
+  <template>
+    <DModal
+      class="feature-topic-on-profile choose-topic-modal"
+      id="choosing-topic"
+      @closeModal={{@closeModal}}
+      @title={{i18n "user.feature_topic_on_profile.title"}}
+    >
+      <:body>
+        <ChooseTopic
+          @additionalFilters="status:public"
+          @currentTopicId={{@model.user.featured_topic.id}}
+          @label="user.feature_topic_on_profile.search_label"
+          @loadOnInit={{true}}
+          @topicChangedCallback={{this.newTopicSelected}}
+        />
+      </:body>
+      <:footer>
+        <DButton
+          class="btn-primary save-featured-topic-on-profile"
+          @action={{this.save}}
+          @disabled={{this.noTopicSelected}}
+          @label="user.feature_topic_on_profile.save"
+        />
+        <DButton class="btn-flat" @action={{@closeModal}} @label="cancel" />
+      </:footer>
+    </DModal>
+  </template>
+}

@@ -1,0 +1,72 @@
+# frozen_string_literal: true
+
+class TopicPublisher
+  def initialize(topic, published_by, category_id)
+    @topic = topic
+    @published_by = published_by
+    @category_id = category_id
+  end
+
+  def publish!
+    published_at = Time.zone.now
+
+    TopicTimestampChanger
+      .new(timestamp: published_at, topic: @topic)
+      .change! do
+        if @topic.private_message?
+          @topic = TopicConverter.new(@topic, @published_by).convert_to_public_topic(@category_id)
+        elsif @topic.category_id != @category_id
+          revised =
+            PostRevisor.new(@topic.first_post, @topic).revise!(
+              @published_by,
+              category_id: @category_id,
+            )
+          raise ActiveRecord::RecordInvalid.new(@topic) unless revised
+        end
+
+        @topic.update_columns(visible: true)
+
+        StaffActionLogger.new(@published_by).log_topic_published(@topic)
+
+        # Clean up any publishing artifacts
+        SharedDraft.where(topic: @topic).delete_all
+
+        TopicTimer
+          .where(topic: @topic)
+          .find_each do |timer|
+            reason = timer.publishing_to_category? ? :completed : :cancelled
+            timer.finish!(reason, by_user: @published_by)
+          end
+
+        op = @topic.first_post
+
+        if op.present?
+          op.revisions.destroy_all
+
+          op.update_columns(version: 1, public_version: 1, last_version_at: published_at)
+        end
+
+        DiscourseEvent.trigger(:topic_published, @topic, published_at)
+      end
+
+    Jobs.enqueue(
+      :notify_tag_change,
+      post_id: @topic.first_post.id,
+      notified_user_ids: [@topic.first_post.user_id, @published_by.id].uniq,
+      diff_tags: @topic.tags.map(&:name),
+      force: true,
+    )
+
+    secure_audience = @topic.secure_audience_publish_messages
+    if secure_audience[:user_ids] != [] && secure_audience[:group_ids] != []
+      secure_audience = [secure_audience, @topic.reload.secure_audience_publish_messages].last
+      MessageBus.publish(
+        "/topic/#{@topic.id}",
+        { reload_topic: true, refresh_stream: true },
+        secure_audience,
+      )
+    end
+
+    @topic
+  end
+end

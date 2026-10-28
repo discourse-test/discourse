@@ -1,0 +1,89 @@
+import { click, render, waitFor } from "@ember/test-helpers";
+import { module, test } from "qunit";
+import Form from "discourse/components/form";
+import { setupRenderingTest } from "discourse/tests/helpers/component-test";
+import pretender, { response } from "discourse/tests/helpers/create-pretender";
+import formKit from "discourse/tests/helpers/form-kit-helper";
+
+module("Integration | Component | FormKit | Controls | Icon", function (hooks) {
+  setupRenderingTest(hooks);
+
+  hooks.beforeEach(function () {
+    pretender.get("/svg-sprite/picker-search", () =>
+      response(200, {
+        icons: [{ id: "pencil", name: "pencil" }],
+        has_more: false,
+      })
+    );
+  });
+
+  test("default", async function (assert) {
+    let data = { foo: null };
+    const mutateData = (x) => (data = x);
+
+    await render(
+      <template>
+        <Form @data={{data}} @onSubmit={{mutateData}} as |form|>
+          <form.Field @name="foo" @title="Foo" @type="icon" as |field|>
+            <field.Control />
+          </form.Field>
+        </Form>
+      </template>
+    );
+
+    await click(".d-icon-grid-picker-trigger");
+    await waitFor("[data-icon-id='pencil']");
+    await click("[data-icon-id='pencil']");
+
+    await formKit().submit();
+    assert.deepEqual(data.foo, "pencil");
+    assert.form().field("foo").hasValue("pencil");
+  });
+
+  test("forwards allowClear and clears the field value", async function (assert) {
+    let data = { foo: "pencil" };
+    const mutateData = (value) => (data = value);
+
+    await render(
+      <template>
+        <Form @data={{data}} @onSubmit={{mutateData}} as |form|>
+          <form.Field @name="foo" @title="Foo" @type="icon" as |field|>
+            <field.Control @allowClear={{true}} />
+          </form.Field>
+        </Form>
+      </template>
+    );
+
+    assert
+      .dom(".d-icon-grid-picker__clear")
+      .exists("the clear action is forwarded to the icon picker");
+
+    await click(".d-icon-grid-picker__clear");
+    await formKit().submit();
+
+    assert.strictEqual(data.foo, null, "the icon value is cleared");
+    assert.form().field("foo").hasNoValue("the cleared field has no value");
+  });
+
+  test("when disabled", async function (assert) {
+    await render(
+      <template>
+        <Form as |form|>
+          <form.Field
+            @disabled={{true}}
+            @name="foo"
+            @title="Foo"
+            @type="icon"
+            as |field|
+          >
+            <field.Control />
+          </form.Field>
+        </Form>
+      </template>
+    );
+
+    assert
+      .dom(".form-kit__control-icon .d-icon-grid-picker-trigger")
+      .isDisabled();
+  });
+});

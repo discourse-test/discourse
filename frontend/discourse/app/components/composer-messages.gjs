@@ -1,0 +1,430 @@
+/* eslint-disable ember/no-classic-components */
+import { tracked } from "@glimmer/tracking";
+import Component from "@ember/component";
+import { fn } from "@ember/helper";
+import EmberObject, { action, computed } from "@ember/object";
+import { schedule } from "@ember/runloop";
+import { tagName } from "@ember-decorators/component";
+import ComposerMessage from "discourse/components/composer-message";
+import ShareTopic from "discourse/components/modal/share-topic";
+import { ajax } from "discourse/lib/ajax";
+import {
+  addUniqueValueToArray,
+  removeValueFromArray,
+} from "discourse/lib/array-tools";
+import { debounce } from "discourse/lib/decorators";
+import { INPUT_DELAY } from "discourse/lib/environment";
+import LinkLookup from "discourse/lib/link-lookup";
+import { userPath } from "discourse/lib/url";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import { i18n } from "discourse-i18n";
+import { autoTrackedArray } from "../lib/tracked-tools.ts";
+
+let _messagesCache = {};
+let _educationMessageShown = false;
+
+export function resetComposerMessagesCache() {
+  _messagesCache = {};
+  _educationMessageShown = false;
+}
+
+function visibleMessages(messages) {
+  if (!_educationMessageShown) {
+    return messages?.content || [];
+  }
+
+  return messages?.content?.filter((msg) => msg.id !== "education") || [];
+}
+
+/**
+ * @typedef {import("discourse/models/rest").default & { id: number, topic: import("discourse/models/topic").default, blurb: string, created_at: string, url: string }} SimilarComposerTopic
+ * @typedef {EmberObject & { id?: string, templateName: string, extraClass?: string, title?: string, body?: string | import("@ember/template").TrustedHTML, wait_for_typing?: boolean, hide_if_whisper?: boolean, reply_username?: string | null, similarTopics?: SimilarComposerTopic[] }} ComposerPopupMessage
+ */
+@tagName("")
+export default class ComposerMessages extends Component {
+  @tracked showShareModal;
+
+  /** @type {SimilarComposerTopic[] | null} */
+  @autoTrackedArray similarTopics = null;
+
+  /** @type {ComposerPopupMessage[] | null} */
+  @autoTrackedArray messages = null;
+
+  checkedMessages = false;
+
+  /** @type {Record<string, ComposerPopupMessage | undefined> | null} */
+  messagesByTemplate = null;
+
+  /** @type {ComposerPopupMessage[] | null} */
+  queuedForTyping = null;
+
+  /** @type {string | null} */
+  usersNotSeen = null;
+  recipientNames = [];
+
+  /** @type {string | null} */
+  _lastSimilaritySearch = null;
+
+  /** @type {ComposerPopupMessage | null} */
+  _similarTopicsMessage = null;
+
+  @computed("composer.viewOpenOrFullscreen")
+  get hidden() {
+    return !this.composer?.viewOpenOrFullscreen;
+  }
+
+  get shareModalData() {
+    const { topic } = this.composer;
+    return {
+      topic,
+      category: topic.category,
+      allowInvites:
+        topic.details.can_invite_to &&
+        !topic.archived &&
+        !topic.closed &&
+        !topic.deleted,
+    };
+  }
+
+  didInsertElement() {
+    super.didInsertElement(...arguments);
+
+    this.appEvents.on("composer:typed-reply", this, this._typedReply);
+    this.appEvents.on("composer:opened", this, this._findMessages);
+    this.appEvents.on("composer:find-similar", this, this._findSimilar);
+    this.appEvents.on("composer-messages:close", this, this._closeTop);
+    this.appEvents.on("composer-messages:create", this, this._create);
+    this.appEvents.on("composer:saved", this, this._resetEducationMessageState);
+    this.reset();
+  }
+
+  willDestroyElement() {
+    super.willDestroyElement(...arguments);
+
+    this.appEvents.off("composer:typed-reply", this, this._typedReply);
+    this.appEvents.off("composer:opened", this, this._findMessages);
+    this.appEvents.off("composer:find-similar", this, this._findSimilar);
+    this.appEvents.off("composer-messages:close", this, this._closeTop);
+    this.appEvents.off("composer-messages:create", this, this._create);
+    this.appEvents.off(
+      "composer:saved",
+      this,
+      this._resetEducationMessageState
+    );
+  }
+
+  // Resets all active messages.
+  // For example if composing a new post.
+  reset() {
+    this.setProperties({
+      messages: [],
+      messagesByTemplate: {},
+      queuedForTyping: [],
+      checkedMessages: false,
+      similarTopics: [],
+    });
+  }
+
+  @action
+  closeMessage(message, event) {
+    event?.preventDefault();
+    this._removeMessage(message);
+  }
+
+  @action
+  hideMessage(message) {
+    this._removeMessage(message);
+
+    // kind of hacky but the visibility depends on this
+    this.messagesByTemplate[message.templateName] = undefined;
+  }
+
+  @action
+  popup(message) {
+    if (this.messages.length) {
+      return;
+    }
+
+    if (!this.messagesByTemplate[message.templateName]) {
+      this.messages.push(message);
+      this.set("messageCount", this.messages.length);
+      this.messagesByTemplate[message.templateName] = message;
+    }
+  }
+
+  @action
+  switchPM(message) {
+    this.composer.set("action", "privateMessage");
+    this.composer.set("targetRecipients", message.reply_username);
+    this._removeMessage(message);
+  }
+
+  _closeTop() {
+    if (this.isDestroying) {
+      return;
+    }
+
+    this.messages.pop();
+    this.set("messageCount", this.messages.length);
+  }
+
+  _removeMessage(message) {
+    removeValueFromArray(this.messages, message);
+    this.set("messageCount", this.messages.length);
+  }
+
+  _create(info) {
+    if (this.isDestroying) {
+      return;
+    }
+
+    schedule("actions", () => {
+      this.reset();
+      this.popup(EmberObject.create(info));
+    });
+  }
+
+  _resetEducationMessageState() {
+    _educationMessageShown = false;
+  }
+
+  // Called after the user has typed a reply.
+  // Some messages only get shown after being typed.
+  @debounce(INPUT_DELAY)
+  async _typedReply() {
+    if (this.isDestroying) {
+      return;
+    }
+
+    const queuedMessages = [...this.queuedForTyping];
+    this.queuedForTyping.length = 0;
+
+    for (const msg of queuedMessages) {
+      if (this.composer.whisper && msg.hide_if_whisper) {
+        continue;
+      }
+
+      this.popup(msg);
+
+      if (msg.id === "education") {
+        _educationMessageShown = true;
+      }
+    }
+
+    if (this.composer.privateMessage) {
+      if (
+        this.composer.targetRecipientsArray.length > 0 &&
+        this.composer.targetRecipientsArray.every(
+          (r) => r.name === this.currentUser.username
+        )
+      ) {
+        const message = this.composer.store.createRecord("composer-message", {
+          id: "yourself_confirm",
+          templateName: "education",
+          title: i18n("composer.yourself_confirm.title"),
+          body: i18n("composer.yourself_confirm.body"),
+        });
+
+        this.popup(message);
+      }
+
+      const recipient_names = this.composer.targetRecipientsArray
+        .filter((r) => r.type === "user")
+        .map(({ name }) => name);
+
+      if (
+        recipient_names.length > 0 &&
+        recipient_names.length !== this.recipientNames.length &&
+        !recipient_names.every((v, i) => v === this.recipientNames[i])
+      ) {
+        this.recipientNames = recipient_names;
+
+        const response = await ajax(
+          `/composer_messages/user_not_seen_in_a_while`,
+          {
+            type: "GET",
+            data: {
+              usernames: recipient_names,
+            },
+          }
+        );
+
+        if (this.isDestroying) {
+          return;
+        }
+
+        if (
+          response.user_count > 0 &&
+          this.usersNotSeen !== response.usernames.join("-")
+        ) {
+          this.set("usersNotSeen", response.usernames.join("-"));
+          this.messagesByTemplate["education"] = undefined;
+
+          let usernames = [];
+          response.usernames.forEach((username, index) => {
+            usernames[index] =
+              `<a class='mention' href='${userPath(username)}'>@${username}</a>`;
+          });
+
+          let body_key;
+          if (response.user_count === 1) {
+            body_key = "composer.user_not_seen_in_a_while.single";
+          } else {
+            body_key = "composer.user_not_seen_in_a_while.multiple";
+          }
+
+          const message = this.composer.store.createRecord("composer-message", {
+            id: "user-not-seen",
+            templateName: "education",
+            body: i18n(body_key, {
+              usernames: usernames.join(", "),
+              time_ago: response.time_ago,
+            }),
+          });
+
+          this.popup(message);
+        }
+      }
+    }
+  }
+
+  async _findSimilar() {
+    if (this.isDestroying) {
+      return;
+    }
+
+    // We don't care about similar topics unless creating a topic
+    if (!this.composer.creatingTopic) {
+      return;
+    }
+
+    // We don't care about similar topics when creating with a form template
+    if (this.composer?.category?.form_template_ids?.length > 0) {
+      return;
+    }
+
+    // TODO: pass the 200 in from somewhere
+    const raw = (this.composer.reply || "").slice(0, 200);
+    const title = this.composer.title || "";
+
+    // Ensure we have at least a title
+    if (title.length < this.siteSettings.min_title_similar_length) {
+      return;
+    }
+
+    // Don't search over and over
+    const concat = title + raw;
+    if (concat === this._lastSimilaritySearch) {
+      return;
+    }
+
+    this._lastSimilaritySearch = concat;
+    this._similarTopicsMessage ||= this.composer.store.createRecord(
+      "composer-message",
+      {
+        id: "similar_topics",
+        templateName: "similar-topics",
+        extraClass: "similar-topics",
+      }
+    );
+
+    const topics = await this.composer.store.find("similar-topic", {
+      title,
+      raw,
+    });
+
+    if (this.isDestroying) {
+      return;
+    }
+
+    this.similarTopics.splice(0, Infinity, ...topics.content);
+
+    if (this.similarTopics.length > 0) {
+      this._similarTopicsMessage.set("similarTopics", this.similarTopics);
+      this.popup(this._similarTopicsMessage);
+    } else if (this._similarTopicsMessage) {
+      this.hideMessage(this._similarTopicsMessage);
+    }
+  }
+
+  // Figure out if there are any messages that should be displayed above the composer.
+  async _findMessages() {
+    if (this.isDestroying) {
+      return;
+    }
+
+    if (this.checkedMessages) {
+      return;
+    }
+
+    const args = { composer_action: this.composer.action };
+    const topicId = this.composer.topic?.id;
+    const postId = this.composer.post?.id;
+
+    if (topicId) {
+      args.topic_id = topicId;
+    }
+
+    if (postId) {
+      args.post_id = postId;
+    }
+
+    const cacheKey = `${args.composer_action}${args.topic_id}${args.post_id}`;
+
+    let messages;
+    if (_messagesCache.cacheKey === cacheKey) {
+      messages = _messagesCache.messages;
+    } else {
+      messages = await this.composer.store.find("composer-message", args);
+      if (this.isDestroying) {
+        return;
+      }
+
+      _messagesCache = { messages, cacheKey };
+    }
+
+    // Checking composer messages on replies can give us a list of links to check for
+    // duplicates
+    if (messages.extras?.duplicate_lookup) {
+      this.addLinkLookup(new LinkLookup(messages.extras.duplicate_lookup));
+    }
+
+    this.set("checkedMessages", true);
+
+    visibleMessages(messages).forEach((msg) => {
+      if (msg.wait_for_typing) {
+        addUniqueValueToArray(this.queuedForTyping, msg);
+      } else {
+        this.popup(msg);
+        if (msg.id === "education") {
+          _educationMessageShown = true;
+        }
+      }
+    });
+  }
+
+  <template>
+    <div
+      class={{dConcatClass
+        "composer-popup-container"
+        (if this.hidden "hidden")
+      }}
+      ...attributes
+    >
+      {{#each this.messages as |message|}}
+        <ComposerMessage
+          @closeMessage={{this.closeMessage}}
+          @message={{message}}
+          @shareModal={{fn (mut this.showShareModal) true}}
+          @switchPM={{this.switchPM}}
+        />
+        {{#if this.showShareModal}}
+          <ShareTopic
+            @closeModal={{fn (mut this.showShareModal) false}}
+            @model={{this.shareModalData}}
+          />
+        {{/if}}
+      {{/each}}
+    </div>
+  </template>
+}

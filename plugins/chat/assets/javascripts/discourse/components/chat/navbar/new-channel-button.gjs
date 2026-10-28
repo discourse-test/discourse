@@ -1,0 +1,27 @@
+import Component from "@glimmer/component";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import DButton from "discourse/ui-kit/d-button";
+import CreateChannelModal from "discourse/plugins/chat/discourse/components/chat/modal/create-channel";
+
+export default class ChatNavbarNewChannelButton extends Component {
+  @service currentUser;
+  @service modal;
+  @service site;
+
+  @action
+  createChannel() {
+    this.modal.show(CreateChannelModal);
+  }
+
+  <template>
+    {{#if this.currentUser.staff}}
+      <DButton
+        class="c-navbar__new-channel-button btn-transparent"
+        @action={{this.createChannel}}
+        @icon="plus"
+        @label={{if this.site.desktopView "chat.create_channel.title"}}
+      />
+    {{/if}}
+  </template>
+}

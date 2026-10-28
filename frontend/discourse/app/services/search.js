@@ -1,0 +1,172 @@
+import { tracked } from "@glimmer/tracking";
+import { action } from "@ember/object";
+import Service, { service } from "@ember/service";
+import { disableImplicitInjections } from "discourse/lib/implicit-injections";
+
+@disableImplicitInjections
+export default class Search extends Service {
+  @service appEvents;
+  @service siteSettings;
+
+  @tracked activeGlobalSearchTerm = "";
+  @tracked highlightTerm;
+  @tracked inTopicContext = false;
+  @tracked visible = false;
+  @tracked results = {};
+  @tracked noResults = false;
+  @tracked welcomeBannerSearchInViewport = false;
+  // only relative for the widget search menu
+  searchContextEnabled = false; // checkbox to scope search
+
+  @tracked _searchContext;
+
+  get searchContext() {
+    return this._searchContext;
+  }
+
+  set searchContext(context) {
+    if (
+      this.inTopicContext &&
+      (context?.type !== this._searchContext?.type ||
+        context?.id !== this._searchContext?.id)
+    ) {
+      this.inTopicContext = false;
+      this.results = {};
+      this.noResults = false;
+    }
+
+    this._searchContext = context;
+  }
+
+  get currentSearchInputId() {
+    if (this.welcomeBannerSearchInViewport) {
+      return "welcome-banner-search-input";
+    } else if (this.searchExperience === "search_field") {
+      return "header-search-input";
+    } else {
+      return "icon-search-input";
+    }
+  }
+
+  get searchExperience() {
+    return this.siteSettings.search_experience;
+  }
+
+  get contextType() {
+    return this.searchContext?.type || null;
+  }
+
+  focusSearchInput() {
+    document.getElementById(this.currentSearchInputId)?.focus();
+  }
+
+  // The need to navigate with the keyboard creates a lot shared logic
+  // between multiple components
+  //
+  // - SearchTerm
+  // - Results::AssistantItem
+  // - Results::Types
+  // - Results::MoreLink
+  // - Results::RecentSearches
+  //
+  // To minimize the duplicate logic we will create a shared action here
+  // that can be reused across all of the components
+  @action
+  handleResultInsertion(e) {
+    if (e.keyCode === 65 /* a or A */) {
+      // add a link and focus composer if open
+      if (document.querySelector("#reply-control.open")) {
+        this.appEvents.trigger(
+          "composer:insert-text",
+          document.activeElement.href,
+          {
+            ensureSpace: true,
+          }
+        );
+        this.appEvents.trigger("header:keyboard-trigger", { type: "search" });
+        document.querySelector("#reply-control.open textarea").focus();
+
+        e.stopPropagation();
+        e.preventDefault();
+        return false;
+      }
+    }
+  }
+
+  @action
+  handleArrowUpOrDown(e) {
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      let focused = e.target.closest(".search-menu") ? e.target : null;
+      if (!focused) {
+        return;
+      }
+
+      const groupedItem =
+        ".search-menu .results [data-search-menu-navigation-item]:not([tabindex='-1'])";
+      const focusableItems = document.querySelectorAll(
+        `.search-menu .results a, ${groupedItem}`
+      );
+      const navigationItems = document.querySelectorAll(
+        `.search-menu .results .search-link, ${groupedItem}`
+      );
+
+      if (!navigationItems.length) {
+        return;
+      }
+
+      let previousNavigationItem;
+      let navigationItem;
+
+      focusableItems.forEach((item) => {
+        if (
+          item.classList.contains("search-link") ||
+          item.hasAttribute("data-search-menu-navigation-item")
+        ) {
+          previousNavigationItem = item;
+        }
+
+        if (item === focused) {
+          navigationItem = previousNavigationItem;
+        }
+      });
+
+      let index = -1;
+      if (navigationItem) {
+        index = Array.prototype.indexOf.call(navigationItems, navigationItem);
+      }
+
+      if (index === -1 && e.key === "ArrowDown") {
+        const firstResult =
+          focused
+            .closest(".search-menu")
+            .querySelector(
+              ".search-result-topic .search-link, .search-result-post .search-link"
+            ) || navigationItems[0];
+        firstResult.focus();
+      } else if (index === 0 && e.key === "ArrowUp") {
+        // the menu's own input, since the one the search experience names
+        // isn't rendered everywhere (e.g. a scrolled topic swaps the header field
+        // for the topic title and search opens from the icon instead)
+        const input = focused
+          .closest(".search-menu")
+          .querySelector(".search-term__input");
+
+        if (input) {
+          input.focus();
+        } else {
+          this.focusSearchInput();
+        }
+      } else if (index > -1) {
+        // change focus to the next navigation item if present
+        index += e.key === "ArrowDown" ? 1 : -1;
+        if (index >= 0 && index < navigationItems.length) {
+          navigationItems[index].focus();
+        }
+      }
+
+      e.stopPropagation();
+      e.preventDefault();
+      return false;
+    }
+  }
+}

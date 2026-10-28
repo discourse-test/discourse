@@ -1,0 +1,81 @@
+import { array } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { LinkTo } from "@ember/routing";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import DButton from "discourse/ui-kit/d-button";
+import DFilterControls from "discourse/ui-kit/d-filter-controls";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import { i18n } from "discourse-i18n";
+
+export default <template>
+  <PluginOutlet @connectorTagName="div" @name="admin-email-templates-index">
+    <DFilterControls
+      @array={{@controller.shownTemplates}}
+      @inputPlaceholder={{i18n
+        "admin.customize.email_templates.search_templates"
+      }}
+      @noResultsMessage={{i18n
+        "admin.customize.email_templates.no_templates_found"
+      }}
+      @searchableProps={{array "title" "id"}}
+      @showDropdownFilter={{false}}
+      @textFilterQueryParam="filter"
+    >
+      <:aboveContent>
+        <label class="checkbox-label">
+          <input
+            checked={{@controller.showOverridenOnly}}
+            id="toggle-overridden"
+            type="checkbox"
+            {{on "click" @controller.toggleOverridenOnly}}
+          />
+          {{i18n "admin.site_text.show_overriden"}}
+        </label>
+      </:aboveContent>
+      <:content as |filteredTemplates|>
+        <table class="d-table email-templates-list">
+          <thead class="d-table__header">
+            <tr class="d-table__row">
+              <th class="d-table__header-cell">{{i18n
+                  "admin.customize.email_templates.title"
+                }}</th>
+              <th class="d-table__header-cell"></th>
+            </tr>
+          </thead>
+          <tbody class="d-table__body">
+            {{#each filteredTemplates as |template|}}
+              <tr
+                class={{dConcatClass
+                  "d-table__row"
+                  "email-templates-list__row"
+                  (if template.can_revert "overridden")
+                }}
+                data-template-id={{template.id}}
+              >
+                <td class="d-table__cell --overview">
+                  <LinkTo
+                    class="d-table__overview-name admin-email-templates__name"
+                    @model={{template.id}}
+                    @route="adminEmailTemplates.edit"
+                  >
+                    {{template.title}}
+                  </LinkTo>
+                </td>
+                <td class="d-table__cell --controls">
+                  <div class="d-table__cell-actions">
+                    <DButton
+                      class="btn-default admin-email-templates__edit-button"
+                      @label="admin.customize.email_templates.edit"
+                      @route="adminEmailTemplates.edit"
+                      @routeModels={{array template.id}}
+                    />
+                  </div>
+                </td>
+              </tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </:content>
+    </DFilterControls>
+  </PluginOutlet>
+</template>

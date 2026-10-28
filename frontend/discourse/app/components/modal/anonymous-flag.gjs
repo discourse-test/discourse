@@ -1,0 +1,38 @@
+import Component from "@glimmer/component";
+import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
+import { isEmpty } from "@ember/utils";
+import DModal from "discourse/ui-kit/d-modal";
+import { i18n } from "discourse-i18n";
+
+export default class AnonymousFlagModal extends Component {
+  @service siteSettings;
+
+  get description() {
+    return this.args.model.flagTarget.anonymousFlagDescription(
+      this.args.model.flagModel,
+      this.#email
+    );
+  }
+
+  get #email() {
+    if (isEmpty(this.siteSettings.email_address_to_report_illegal_content)) {
+      return this.siteSettings.contact_email;
+    }
+    return this.siteSettings.email_address_to_report_illegal_content;
+  }
+
+  <template>
+    <DModal
+      class="anonymous-flag-modal"
+      @bodyClass="anonymous-flag-modal__body"
+      @closeModal={{@closeModal}}
+      @title={{i18n "anonymous_flagging.title"}}
+    >
+      <:body>
+        <p>{{trustHTML (i18n "flagging.review_process_description")}}</p>
+        <p>{{trustHTML this.description}}</p>
+      </:body>
+    </DModal>
+  </template>
+}

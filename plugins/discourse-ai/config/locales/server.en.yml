@@ -1,0 +1,1501 @@
+en:
+  activerecord:
+    attributes:
+      llm_model:
+        name: "Model ID"
+        max_prompt_tokens: "Context window"
+  dashboard:
+    problem:
+      ai_llm_status:
+        one: "<a href='%{base_path}/admin/plugins/discourse-ai/ai-llms/%{target}/edit'>%{model_name}</a> needs attention. In the past hour, it failed to respond %{failed_calls} out of %{total_calls} times."
+        other: "<a href='%{base_path}/admin/plugins/discourse-ai/ai-llms/%{target}/edit'>%{model_name}</a> needs attention. Over the last %{count} hours, it failed to respond %{failed_calls} out of %{total_calls} times."
+      ai_credit_soft_limit: "%{model_name} has only %{percentage_remaining}% of credits remaining. Credits will reset at %{reset_date}. <a href='%{url}'>View AI models</a>"
+      ai_credit_hard_limit: "You have run out of AI credits for %{model_name}. AI features will be unavailable until %{reset_date}. <a href='%{url}'>View AI models</a>"
+      ai_ask_ai_external_source: "Ask AI skipped its external source <a href='%{base_path}/admin/plugins/discourse-ai/ai-tools/%{target}/edit'>%{tool_name}</a> in %{skipped} of its last %{searches} searches over the past %{hours} hours: %{timed_out} took longer than the external source wait, %{failed} failed, and %{busy} were skipped because too many searches were still waiting on external sources."
+      ai_image_caption_agent: "AI image captions are enabled, but the selected image caption agent is not ready: %{reason}. <a href='%{url}'>Review the image caption agent</a>."
+      ai_image_caption_agent_reasons:
+        agent_missing: "the selected agent does not exist"
+        agent_vision_disabled: "the agent cannot include image uploads"
+        llm_missing: "the agent does not resolve to an LLM"
+        llm_vision_disabled: "the resolved LLM does not support image input"
+      ai_llm_vision_delegation: "%{model_name} cannot use its configured vision model: %{reason}. <a href='%{url}'>Review the AI model</a>."
+      ai_llm_vision_delegation_reasons:
+        missing: "the vision model no longer exists"
+        native_and_delegated: "native image input and delegated vision are both configured"
+        self_reference: "a model cannot use itself for vision"
+        delegated: "the vision model delegates to another model"
+        not_native: "the vision model does not support native image input"
+  discourse_automation:
+    ai:
+      flag_types:
+        review: "Add post to review queue"
+        review_hide: "Add post to review queue and hide post"
+        review_delete: "Add post to review queue and delete post"
+        review_delete_silence: "Add post to review queue, delete post and silence user"
+        spam: "Flag as spam and hide post"
+        spam_silence: "Flag as spam, hide post and silence user"
+    scriptables:
+      ai_tool_action:
+        title: AI Tool Action
+        description: Execute an AI tool when the automation triggers
+      llm_agent_triage:
+        title: Triage posts using AI Agent
+        description: "Respond to posts using a specific AI agent"
+      llm_triage:
+        title: Triage posts using AI
+        description: "Triage posts using a large language model"
+        flagged_post: |
+          %{score_reason}
+          %{response}
+        flagged_post_response: "Response from the model: %{llm_response}"
+        flagged_post_score_reason: |
+          <b>Triggered by the <a href="%{base_path}/admin/plugins/automation/automation/%{automation_id}">%{automation_name}</a> rule.</b>
+        notify_author_pm:
+          subject: "Your post was temporarily removed for review"
+          body: |
+            Hi @%{username},
+
+            Your post in “%{topic_title}” was temporarily removed and placed in our review queue for a moderator to look at. If approved, it will be restored automatically.
+
+            Reference: %{post_url}
+      llm_report:
+        title: Periodic report using AI
+        description: "Periodic report based on a large language model"
+      llm_tagger:
+        title: Tag topics using AI
+        description: "Automatically tag topics using AI"
+  site_settings:
+    ai_ask_ai_report_weekly_enabled: "Automatically generate an Ask AI report each week for the previous seven complete days. Reports appear on the dashboard. If groups are selected in {{setting:ai_ask_ai_report_recipient_groups}}, they also receive a PM. Requires Ask AI to be enabled and a configured report language model. Manual reports remain available."
+    ai_ask_ai_report_agent: "Agent used to group users’ questions into Ask AI dashboard reports."
+    ai_ask_ai_report_exclude_groups: "Exclude questions asked by members of these groups from new Ask AI reports. Leave empty to include everyone."
+    ai_ask_ai_report_max_asks: "Maximum number of asks analysed per report. Uses all asks in the selected period or the latest asks up to this limit, whichever is fewer. Larger reports need more model context and may cost more."
+    ai_ask_ai_report_recipient_groups: "Groups that receive automatic weekly report PMs and can be included in manual report PMs. Reports include users’ questions. Leave empty to keep automatic reports on the dashboard only."
+    discourse_ai_enabled: "Enable the discourse AI plugin."
+    enable_ai_bot_starred_conversations: "Allow users to star AI bot conversations and show them in a Starred sidebar section."
+    ai_default_llm_model: "The default language model for AI features and agents that don't specify their own"
+    ai_artifact_security: "The AI artifact system generates IFRAMEs with runnable code. Strict mode forces an extra click to run code. Lax mode runs code immediately. Hybrid mode allows user to supply data-ai-artifact-autorun to show right away. Disabled mode disables the artifact system."
+    ai_toxicity_enabled: "Enable the toxicity module."
+    ai_toxicity_inference_service_api_endpoint: "URL where the API is running for the toxicity module"
+    ai_toxicity_inference_service_api_key: "API key for the toxicity API"
+    ai_toxicity_inference_service_api_model: "Model to use for inference. Multilingual model works with Italian, French, Russian, Portuguese, Spanish and Turkish."
+    ai_toxicity_flag_automatically: "Automatically flag posts / chat messages that are above the configured thresholds."
+    ai_toxicity_flag_threshold_toxicity: "Toxicity: a rude, disrespectful, or unreasonable comment that is somewhat likely to make you leave a discussion or give up on sharing your perspective"
+    ai_toxicity_flag_threshold_severe_toxicity: "Severe Toxicity: a very hateful, aggressive, or disrespectful comment that is very likely to make you leave a discussion or give up on sharing your perspective"
+    ai_toxicity_flag_threshold_obscene: "Obscene"
+    ai_toxicity_flag_threshold_identity_attack: "Identity Attack"
+    ai_toxicity_flag_threshold_insult: "Insult"
+    ai_toxicity_flag_threshold_threat: "Threat"
+    ai_toxicity_flag_threshold_sexual_explicit: "Sexual Explicit"
+    ai_toxicity_groups_bypass: "Users on those groups will not have their posts classified by the toxicity module."
+
+    ai_sentiment_enabled: "Classify posts as positive, neutral, or negative."
+    ai_sentiment_emotion_enabled: "Classify the emotions expressed in posts."
+    ai_sentiment_inference_service_api_endpoint: "URL where the API is running for the sentiment module"
+    ai_sentiment_inference_service_api_key: "API key for the sentiment API"
+    ai_sentiment_model_configs: "Classification model endpoints to use for inference. Sentiment classifies posts as positive, neutral, or negative. Emotion classifies posts across supported emotion labels."
+    ai_sentiment_models: "Classification model endpoints to use for inference. Sentiment classifies posts as positive, neutral, or negative. Emotion classifies posts across supported emotion labels."
+    ai_sentiment_sentiment_classification_strategy: "Sentiment classification backend."
+    ai_sentiment_sentiment_agent: "Agent for sentiment classification."
+    ai_sentiment_sentiment_decision_model: "Decision model for sentiment classification. Changing it does not reclassify existing results."
+    ai_sentiment_emotion_decision_model: "Decision model for emotion classification. Scores are distributed across 28 emotions. Changing it does not reclassify existing results."
+    ai_sentiment_emotion_classification_strategy: "Emotion classification backend."
+    ai_sentiment_emotion_agent: "Agent for emotion classification."
+    ai_sentiment_backfill_maximum_posts_per_hour: "Approximate hourly post limit for the 5-minute scan. Each enabled classifier may incur a request per post. Refusals may be retried. 0 stops scheduled scanning, including new posts; edited posts are checked separately."
+    ai_sentiment_backfill_post_max_age_days: "Only scan posts created within this many days. 0 means today, not unlimited history."
+
+    ai_nsfw_detection_enabled: "Enable the NSFW module."
+    ai_nsfw_inference_service_api_endpoint: "URL where the API is running for the NSFW module"
+    ai_nsfw_inference_service_api_key: "API key for the NSFW API"
+    ai_nsfw_flag_automatically: "Automatically flag NSFW posts that are above the configured thresholds."
+    ai_nsfw_flag_threshold_general: "General Threshold for an image to be considered NSFW."
+    ai_nsfw_flag_threshold_drawings: "Threshold for a drawing to be considered NSFW."
+    ai_nsfw_flag_threshold_hentai: "Threshold for an image classified as hentai to be considered NSFW."
+    ai_nsfw_flag_threshold_porn: "Threshold for an image classified as porn to be considered NSFW."
+    ai_nsfw_flag_threshold_sexy: "Threshold for an image classified as sexy to be considered NSFW."
+    ai_nsfw_models: "Models to use for NSFW inference."
+
+    ai_spam_detection_enabled: "Enable the AI spam detection module"
+    ai_spam_detection_max_post_count: "Maximum number of posts a user can have before they are no longer scanned for spam"
+    ai_spam_detection_max_trust_level: "Maximum trust level of users to scan for spam"
+
+    ai_openai_api_key: "API key for OpenAI API. ONLY used for Image creation and edits. For GPT use the LLM config tab"
+
+    ai_helper_enabled: "Enable the AI helper."
+    composer_ai_helper_allowed_groups: "Users on these groups will see the AI helper button in the composer."
+    ai_helper_allowed_in_pm: "Enable the composer's AI helper in PMs."
+    ai_helper_automatic_chat_thread_title_delay: "Delay in minutes before the AI helper automatically sets the chat thread title."
+    ai_helper_automatic_chat_thread_title: "Automatically set the chat thread titles based on thread contents."
+    ai_helper_enabled_features: "Select the features to enable in the AI helper. Title suggestions in the composer are offered through the AI helper menu and also require the context_menu feature."
+    ai_image_caption_agent: "The agent to use for AI image captions. Custom agents must have image uploads enabled and use a vision-capable LLM."
+    ai_post_image_captions_enabled: "Enable AI captions for post images. Generating missing captions requires a configured {{setting:ai_image_caption_agent}}."
+    ai_post_image_captions_per_post_limit: "Maximum number of post images to caption per post."
+    ai_post_image_captions_backfill_hourly_rate: "Maximum number of posts per hour to backfill with AI-generated image captions. Set to 0 to disable backfill."
+    ai_post_image_captions_backfill_max_age_days: "Maximum age in days of posts to backfill with AI-generated image captions."
+    post_ai_helper_allowed_groups: "User groups allowed to access AI Helper features in posts"
+    ai_helper_post_illustrator_agent: "The agent to use for the AI helper's illustrate post feature. Note: you must also create an image generation tool (Admin > Plugins > Discourse AI > Tools) for this feature to work."
+    ai_helper_chat_thread_title_agent: "The agent to use for generating chat thread titles."
+
+    ai_embeddings_selected_model: "Use the selected model for generating embeddings."
+    ai_embeddings_generate_for_pms: "Generate embeddings for personal messages. This is also required for semantic personal-message results in Ask AI."
+    ai_embeddings_semantic_related_topics_enabled: "Use Semantic Search for related topics."
+    ai_embeddings_semantic_related_topics: "Maximum number of topics to show in related topic section."
+    ai_embeddings_backfill_batch_size: "Number of embeddings to backfill every 15 minutes."
+    ai_embeddings_semantic_search_enabled: "Enable full-page semantic search."
+    ai_embeddings_semantic_search_use_hyde: "Use HyDE for semantic full page search. Uses an LLM to create an hypothetical post from the user search term to help with matches."
+    ai_embeddings_semantic_quick_search_enabled: "Enable semantic search option in search menu popup."
+    ai_embeddings_semantic_related_include_closed_topics: "Include closed topics in semantic search results"
+    ai_embeddings_semantic_related_age_penalty: "Apply exponential age penalty to topics in semantic search results. 0.0 = no penalty, 0.3 = gentle bias toward recently active content, 1.0+ = strong recency bias."
+    ai_embeddings_semantic_related_age_time_scale: "Time scale in days for age penalty calculation. Topics inactive this many days receive ~50% penalty with penalty=1.0. Use 365 for yearly scale, 90 for quarterly scale."
+    ai_embeddings_per_post_enabled: Generate embeddings for each post
+
+    ai_admin_dashboard_enabled: "Enable AI features on the admin dashboard."
+    ai_admin_dashboard_highlights_agent: "Agent that explains notable community shifts on the admin dashboard."
+    ai_admin_dashboard_highlights_category_scope: "Choose which categories AI highlights can use. Include and exclude options use {{setting:ai_admin_dashboard_highlights_categories}}. Personal messages are always excluded."
+    ai_admin_dashboard_highlights_categories: "Categories used when the AI highlights category scope is set to <strong>include</strong> or <strong>exclude</strong>."
+    ai_summarization_enabled: "Enable the summarize feature"
+    ai_summaries_for_crawlers: "Include AI topic summaries in public HTML topic pages served to search engines and other crawlers, and in the Markdown version of those pages. Requires {{setting:ai_summarization_enabled}} and {{setting:ai_summary_backfill_maximum_topics_per_hour}} above 0, so summaries stay up to date."
+    ai_summarization_agent: "Agent to use for summarize feature"
+    ai_pm_summarization_allowed_groups: "Groups allowed to create and view summaries in PMs."
+    ai_summary_gists_enabled: "Generate brief summaries of latest replies in topics automatically"
+    ai_summary_gists_agent: "Agent used to generate brief topic summaries. Gist generation always uses the built-in final-summary tool; other tools and structured response formats configured on the agent are ignored."
+    ai_summary_backfill_maximum_topics_per_hour: "Number of topic summaries to backfill per hour. Each localized gist counts toward this limit. Must be above 0 to turn on {{setting:ai_summaries_for_crawlers}}."
+
+    ai_bot_enabled: "Enable the AI Bot module."
+    ai_bot_enabled_llms: "LLMs available to select for AI bot conversations"
+    ai_bot_enable_chat_warning: "Display a warning when PM chat is initiated. Can be overridden by editing the translation string: discourse_ai.ai_bot.pm_warning"
+    ai_bot_allowed_groups: "Members of these groups can have conversations with AI bots. Agents that allow personal messages use their own allowed groups instead. Anonymous users can't use the bot; when added to this setting, they can only preview the AI bot conversations page and are prompted to log in to ask a question."
+    ai_bot_debugging_allowed_groups: "Allow these groups to see a debug button on posts which displays the raw AI request and response"
+    ai_bot_public_sharing_allowed_groups: "Allow these groups to share AI personal messages with the public via a unique publicly available link. Note: if your site requires login, shares will also require login."
+    ai_bot_add_to_header: "Display a button in the header to start a PM with an AI Bot"
+    ai_bot_add_to_community_section: "Display a link in the sidebar community section to start a PM with an AI Bot"
+    ai_bot_github_access_token: "GitHub access token for use with GitHub AI tools (required for search support)"
+    ai_bot_enable_docked_composer: "Enable the docked chat-style composer for AI bot conversations instead of the standard floating composer."
+
+    ai_discover_enabled: "Enable the discovery search feature"
+    ai_discover_agent: "Agent to use for discovery search feature"
+    ai_ask_ai_enabled: "Enable Ask AI in search"
+    ai_ask_ai_summary_detail: "Choose how much detail to include in Ask AI summaries."
+    ai_ask_ai_related_count: "Set the maximum number of related discussions Ask AI selects and shows with each answer."
+    enable_ai_combined_search: "Pressing enter in the header search answers with AI and shows keyword results together as tabs, opening on the one the search most likely wants. Follow-up questions continue on a full page."
+    ai_ask_ai_search_intent_decision_model: "Experimental: decision model that judges whether a search wants an AI answer or keyword results, to choose which tab the combined search opens on. Search queries are sent to this model's provider. Leave blank to judge from how the query is written."
+    ai_ask_ai_agent: "Agent that selects sources and writes Ask AI answers."
+    ai_ask_ai_query_rewriter_agent: "Agent used to prepare separate keyword and semantic queries for Ask AI. If this agent or its model is unavailable, Ask AI searches with the user's original query."
+    ai_ask_ai_follow_up_agent: "Agent used when a user wants to follow up an Ask AI result. The selected agent must be enabled, allow personal messages, and be available to the user."
+    ai_ask_ai_keyword_search_enabled: "Search the forum by keyword for Ask AI answers."
+    ai_ask_ai_semantic_search_enabled: "Search the forum semantically for Ask AI answers. Requires embeddings."
+    ai_ask_ai_search_categories: "Only search these categories, and their subcategories, for Ask AI answers. Personal messages are still searched when asked for. Leave empty to search all categories."
+    ai_ask_ai_endorsed_reply_groups: "Also give Ask AI one reply from each topic without an accepted answer. Replies the topic's author liked rank first, then the author's own follow-ups that others liked, then replies members of these groups liked. Staff on communities where they like posts freely may want a narrower group. Leave empty to turn this off."
+    ai_ask_ai_search_max_age_days: "Only search posts created in this many days for Ask AI answers. Set to 0 to search posts of any age."
+    ai_ask_ai_external_sources: "Custom tools Ask AI searches alongside the forum. Each is called with the user's query and must return a list of results, each with a title, an http(s) url, and optionally a blurb, content and published_at. Queries are sent to whatever services the tools call."
+    ai_ask_ai_external_sources_timeout: "Seconds Ask AI waits for its external sources, all searched at once, before answering without the ones still running. Counts towards the 20 seconds an Ask AI request may take, so a longer wait leaves less time to write the answer."
+    ai_ask_ai_allowed_groups: "Groups allowed to use Ask AI and its follow-up handoff. The Ask AI agent's permissions, the follow-up agent's permissions, and normal topic, category, and personal-message visibility still apply. Semantic personal-message search requires {{setting:ai_embeddings_generate_for_pms}}. Content visible to an allowed user, including restricted topics and personal messages, may be sent to the configured LLM provider."
+
+    ai_google_custom_search_api_key: "API key for the Google Custom Search API see: https://developers.google.com/custom-search"
+    ai_google_custom_search_cx: "CX for Google Custom Search API"
+
+    ai_discord_search_enabled: "Enables the Discord search feature"
+    ai_discord_app_id: "The ID of the Discord application you would like to connect Discord search to"
+    ai_discord_app_public_key: "The public key of the Discord application you would like to connect Discord search to"
+    ai_discord_search_mode: "Select the search mode to use for Discord search"
+    ai_discord_search_agent: "The agent to use for Discord search."
+    ai_discord_allowed_guilds: "Discord guilds (servers) where the bot is allowed to search"
+
+    ai_translation_enabled: "Enable the AI translation feature"
+    ai_translation_category_scope: "Choose which categories AI translation can use. Include and exclude options use {{setting:ai_translation_categories}}. Personal messages are controlled by {{setting:ai_translation_personal_messages}}."
+    ai_translation_categories: "Categories used when the AI translation category scope is set to <strong>include</strong> or <strong>exclude</strong>."
+    ai_translation_personal_messages: "Controls which personal messages are translated. 'none' disables PM translation. 'group' translates only group PMs. 'all' translates all PMs."
+    ai_translation_include_bot_content: "When enabled, content written by bots (user IDs below 0) will also be sent for translation."
+    ai_translation_backfill_start_date: "The UTC date from which historical posts and topics will be sent for translation backfilling. Leave blank to disable backfilling. New content will continue to be translated."
+    ai_translation_backfill_hourly_rate: "The number of posts and topics to translate per hour during backfill operations. Set to 0 to disable automatic backfilling of translations for existing content."
+    ai_translation_backfill_parallel_jobs: "The number of parallel post localization jobs to run per backfill cycle. Higher values increase throughput but consume more resources."
+    ai_usage_rollup_after_days: "Number of days to keep per-request AI usage stats before rolling them into daily aggregates. Set to 0 to disable rollups."
+    ai_audit_logs_detailed_retention_days: "Keep raw AI request and response payloads for this many days. Set to 0 to keep payloads until the summary log is deleted. Raw payloads can contain private or sensitive content. Cleanup continues while the AI plugin is disabled."
+    ai_audit_logs_purge_after_days: "Keep AI API audit log summaries for this many days before deleting the entire log. Set to 0 to keep summaries forever. Cleanup continues while the AI plugin is disabled."
+
+  reviewables:
+    reasons:
+      flagged_by_toxicity: The AI plugin flagged this after classifying it as toxic.
+      flagged_by_nsfw: The AI plugin flagged this after classifying at least one of the attached images as NSFW.
+
+  reports:
+    sentiment_analysis:
+      title: "Sentiment analysis"
+      description: "This report provides sentiment analysis for posts, grouped by category, with positive, negative, and neutral scores for each post and category."
+    overall_sentiment:
+      title: "Overall sentiment"
+      description: "The chart shows the number of positive posts minus the number of negative posts each day. Posts count as positive or negative when their respective score exceeds the threshold. Neutral posts and personal messages (PMs) are excluded. Scores come from the selected sentiment classification backend."
+      xaxis: "Positive(%)"
+      yaxis: "Date"
+    emotion_admiration:
+      title: 🤩 Admiration
+      description: "Posts classified with the emotion admiration using the selected emotion classification backend."
+    emotion_amusement:
+      title: 😄 Amusement
+      description: "Posts classified with the emotion amusement using the selected emotion classification backend."
+    emotion_anger:
+      title: 😠 Anger
+      description: "Posts classified with the emotion anger using the selected emotion classification backend."
+    emotion_annoyance:
+      title: 😒 Annoyance
+      description: "Posts classified with the emotion annoyance using the selected emotion classification backend."
+    emotion_approval:
+      title: 👍 Approval
+      description: "Posts classified with the emotion approval using the selected emotion classification backend."
+    emotion_caring:
+      title: 🤗 Caring
+      description: "Posts classified with the emotion caring using the selected emotion classification backend."
+    emotion_confusion:
+      title: 😕 Confusion
+      description: "Posts classified with the emotion confusion using the selected emotion classification backend."
+    emotion_curiosity:
+      title: 🤔 Curiosity
+      description: "Posts classified with the emotion curiosity using the selected emotion classification backend."
+    emotion_desire:
+      title: 😍 Desire
+      description: "Posts classified with the emotion desire using the selected emotion classification backend."
+    emotion_disappointment:
+      title: 😞 Disappointment
+      description: "Posts classified with the emotion disappointment using the selected emotion classification backend."
+    emotion_disapproval:
+      title: 👎 Disapproval
+      description: "Posts classified with the emotion disapproval using the selected emotion classification backend."
+    emotion_disgust:
+      title: 🤢 Disgust
+      description: "Posts classified with the emotion disgust using the selected emotion classification backend."
+    emotion_embarrassment:
+      title: 😳 Embarrassment
+      description: "Posts classified with the emotion embarrassment using the selected emotion classification backend."
+    emotion_excitement:
+      title: 🤪 Excitement
+      description: "Posts classified with the emotion excitement using the selected emotion classification backend."
+    emotion_fear:
+      title: 😨 Fear
+      description: "Posts classified with the emotion fear using the selected emotion classification backend."
+    emotion_gratitude:
+      title: 🙏 Gratitude
+      description: "Posts classified with the emotion gratitude using the selected emotion classification backend."
+    emotion_grief:
+      title: 😢 Grief
+      description: "Posts classified with the emotion grief using the selected emotion classification backend."
+    emotion_joy:
+      title: 😊 Joy
+      description: "Posts classified with the emotion joy using the selected emotion classification backend."
+    emotion_love:
+      title: ❤️ Love
+      description: "Posts classified with the emotion love using the selected emotion classification backend."
+    emotion_nervousness:
+      title: 😰 Nervousness
+      description: "Posts classified with the emotion nervousness using the selected emotion classification backend."
+    emotion_neutral:
+      title: 😐 Neutral
+      description: "Posts classified with the emotion neutral using the selected emotion classification backend."
+    emotion_optimism:
+      title: 🌟 Optimism
+      description: "Posts classified with the emotion optimism using the selected emotion classification backend."
+    emotion_pride:
+      title: 🦁 Pride
+      description: "Posts classified with the emotion pride using the selected emotion classification backend."
+    emotion_realization:
+      title: 💡 Realization
+      description: "Posts classified with the emotion realization using the selected emotion classification backend."
+    emotion_relief:
+      title: 😌 Relief
+      description: "Posts classified with the emotion relief using the selected emotion classification backend."
+    emotion_remorse:
+      title: 😔 Remorse
+      description: "Posts classified with the emotion remorse using the selected emotion classification backend."
+    emotion_sadness:
+      title: 😭 Sadness
+      description: "Posts classified with the emotion sadness using the selected emotion classification backend."
+    emotion_surprise:
+      title: 😲 Surprise
+      description: "Posts classified with the emotion surprise using the selected emotion classification backend."
+
+  discourse_ai:
+    ask_ai_reports:
+      no_model: "Configure a default AI language model before generating reports."
+      no_asks: "There are no questions matching the report settings in this period."
+      title: "What users are asking: %{start} – %{end}"
+      coverage: "Analysed the latest %{count} of %{total} asks in this period. Questions can appear in multiple subjects."
+      ungrouped_name: "Ungrouped questions"
+      ungrouped_description: "The report did not assign these questions to a subject."
+      no_insights: "These questions did not provide enough evidence for a specific follow-up recommendation."
+      suggested_action: "Suggested follow-up: %{action}"
+      view_dashboard: "Explore all subjects and questions on the dashboard"
+      disclaimer: "AI-generated observations describe the questions asked, not the quality or helpfulness of their answers. Suggested follow-ups are possibilities to investigate, not confirmed gaps. Questions can appear in multiple subjects."
+    ai_artifact:
+      share_version_conflict: "This link already publishes a different version. Refresh and choose Update pinned version to change it."
+      uploads_cannot_be_shared: "This artifact references uploads that may be private. Remove the upload references before publishing a standalone link."
+      errors:
+        max_keys_exceeded:
+          one: "You can only have %{count} key in the artifact."
+          other: "You can only have %{count} keys in the artifact."
+      link: "Show in new tab"
+      copy_embed: "Copy embed"
+      view_source: "View Source"
+      view_changes: "View Changes"
+      change_description: "Change Description"
+      copied: "Copied to clipboard"
+    unknown_model: "Unknown AI model"
+    multiple_models: "Multiple models"
+
+    discourse_workflows:
+      ai_agent:
+        errors:
+          invalid_mode: "'%{mode}' is not a supported AI agent execution mode."
+          locked_default_llm_missing: "Agent '%{agent}' is locked to its default LLM, but no valid default LLM is configured"
+          llm_not_found: "LLM model with id %{llm_model_id} not found"
+          no_llm_configured: "No LLM is configured for agent '%{agent}'. Select an LLM model or configure an agent/site default LLM."
+          uploads_not_sent: "Agent '%{agent}' did not receive every upload"
+      classify:
+        errors:
+          decision_model_not_found: "Decision model with id %{id} not found"
+          classify_failed: "Decision model '%{decision_model}' could not answer: %{error}"
+      uploads:
+        not_found: "Upload %{upload_id} was not found"
+        not_visible: "%{username} cannot see upload %{upload_id}"
+        agent_cannot_see_images: "Upload %{upload_id} is an image and agent '%{agent}' has vision disabled"
+        llm_cannot_see_images: "Upload %{upload_id} is an image and LLM '%{llm}' has vision disabled"
+        llm_cannot_read_documents: "Upload %{upload_id} is a document and LLM '%{llm}' accepts no attachments"
+        unsupported_image_format: "Upload %{upload_id} is not a supported image format (%{formats})"
+        skipped: "Upload %{upload_id} (%{filename}) was not sent: %{message}"
+
+    tools:
+      custom_name: "%{name} (custom)"
+      presets:
+        browse_web_jina:
+          name: "Browse web (jina.ai)"
+        exchange_rate:
+          name: "Exchange rate"
+        stock_quote:
+          name: "Stock quote (AlphaVantage)"
+        image_generation_category:
+          name: "Image generation..."
+        image_generation_custom:
+          name: "Custom"
+        image_generation_openai:
+          name: "OpenAI"
+        image_generation_gemini:
+          name: "Nano Banana"
+        image_generation_flux:
+          name: "FLUX 1.1 Pro"
+        image_generation_flux2:
+          name: "FLUX 2 Pro"
+        empty_tool:
+          name: "Start from blank..."
+      name:
+        characters: "must only include numbers, letters, and underscores"
+      secret_contracts:
+        invalid_payload: "Secret contracts must be an array."
+        invalid_contract: "Secret contract at index %{index} is invalid."
+        alias_required: "Secret contract at index %{index} must include an alias."
+        alias_too_long: "Secret alias `%{alias}` is too long."
+        alias_invalid: "Secret alias `%{alias}` must only include numbers, letters, and underscores."
+        alias_not_unique: "Secret alias `%{alias}` is duplicated."
+      secret_bindings:
+        invalid_payload: "Secret bindings must be an array."
+        secret_not_found: "The selected credential does not exist."
+        alias_not_declared: "Alias `%{alias}` is not declared in this tool."
+      secret_runtime:
+        alias_not_declared: "Credential alias `%{alias}` is not declared for this tool."
+        missing_binding: "Credential alias `%{alias}` is required but not bound."
+        missing_required_aliases: "Missing required credential bindings for aliases: %{aliases}."
+        secret_not_found: "Credential alias `%{alias}` is bound to a missing credential."
+        unknown_error: "Unable to resolve the requested credential."
+
+    mcp_servers:
+      secret_not_found: "The selected credential does not exist."
+      invalid_url_not_https: "must be a valid HTTPS URL"
+      invalid_url_not_reachable: "must resolve to a publicly accessible address"
+      oauth_client_id_required: "OAuth client ID is required for manual client registration."
+      errors:
+        invalid_response: "The MCP server returned an invalid response."
+        request_failed: "The MCP server request failed with status %{status}."
+        session_expired: "The MCP session expired."
+        unsupported_protocol_version: "Unsupported MCP protocol version: %{version}"
+        no_supported_version: "No supported MCP protocol version advertised"
+        modern_request_rejected: "Modern MCP request rejected"
+        invalid_discovery_response: "Invalid MCP server/discover response"
+        missing_protocol_version: "Missing MCP protocol version in initialize response"
+        tool_unavailable: "MCP tool definition unavailable: %{name}"
+        invalid_tool_schema: "Invalid MCP tool input schema"
+        invalid_header_annotation: "Invalid x-mcp-header annotation"
+        unsupported_schema_reference: "Unsupported MCP tool schema reference"
+        invalid_header_value: "Invalid MCP header value"
+        invalid_annotated_argument: "Invalid MCP annotated tool argument"
+        timeout: "The MCP server request timed out."
+        oauth_authorization_required: "OAuth authorization is required before this MCP server can be used. Connect it to %{issuer} from the admin UI."
+        oauth_discovery_failed: "Unable to discover OAuth authorization details for this MCP server."
+        oauth_discovery_failed_with_status: "OAuth discovery failed with status %{status}."
+        oauth_not_configured: "OAuth is not configured for this MCP server."
+        oauth_refresh_token_missing: "The OAuth refresh token is missing. Reconnect this MCP server."
+        oauth_save_before_connect: "Save the MCP server before testing the OAuth connection."
+        oauth_state_invalid: "The OAuth authorization state is invalid or has expired. Start the connection again."
+        oauth_token_exchange_failed: "The OAuth token exchange failed with status %{status}."
+        oauth_https_required: "OAuth requires your site to be served over HTTPS."
+        oauth_callback_failed: "OAuth connection failed: %{message}"
+        oauth_refresh_token_required: "The OAuth authorization server did not return a refresh token. Adjust the advanced OAuth options and reconnect this MCP server."
+        oauth_client_metadata_public_https_required: "Client metadata document registration requires a public HTTPS site URL. Current client metadata URL: %{url}"
+        oauth_registration_endpoint_missing: "The OAuth authorization server does not advertise a registration endpoint."
+        oauth_manual_client_registration_required: "The OAuth authorization server %{issuer} does not advertise dynamic client registration. Switch this MCP server to Manual client credentials and provide a registered OAuth client ID."
+        oauth_client_secret_required: "The OAuth authorization server %{issuer} requires token endpoint client authentication (%{methods}). Configure manual client credentials with a client secret."
+        oauth_token_endpoint_auth_method_unsupported: "The OAuth authorization server %{issuer} only advertises unsupported token endpoint client authentication methods (%{methods}). This MCP server currently supports none, client_secret_basic, and client_secret_post."
+        oauth_client_registration_failed: "Dynamic client registration failed with status %{status}."
+        oauth_client_registration_failed_no_id: "Dynamic client registration succeeded but no client_id was returned."
+      oauth_authorization_params_invalid: "OAuth authorization params must be a JSON object."
+      oauth_token_params_invalid: "OAuth token params must be a JSON object."
+
+    ai_helper:
+      errors:
+        completion_request_failed: "Something went wrong while trying to provide suggestions. Please, try again."
+        no_illustrator_agent: "Post Illustrator agent is not configured. Please check your site settings."
+        no_image_generation_tool: "Post Illustrator agent must have an image generation tool attached. Please configure an image generation tool for this agent in the admin panel."
+        no_image_generated: "Failed to generate image. Please try again or check your tool configuration."
+        llm_model_not_configured: "No language model is configured for image generation. Please configure a default language model in your site settings."
+        unknown_error: "An unexpected error occurred while generating thumbnails. Please try again."
+      prompts:
+        translate: Translate to %{language}
+        generate_titles: Suggest topic title
+        proofread: Proofread text
+        markdown_table: Generate Markdown table
+        custom_prompt: "Custom Prompt"
+        explain: "Explain"
+        illustrate_post: "Illustrate Post"
+        replace_dates: "Smart dates"
+      image_caption:
+        aria_description: "%{description} (Captioned by AI)"
+    image_caption:
+      configuration:
+        agent_missing: "Select an existing agent for AI image captions."
+        agent_vision_disabled: "The AI image caption agent must have image uploads enabled."
+        llm_missing: "The AI image caption agent must use an LLM."
+        llm_vision_disabled: "The AI image caption agent must use a vision-capable LLM."
+    ask_ai:
+      external_sources:
+        invalid_output: "Ask AI sources must return a list of results."
+        invalid_result: "Result %{position} needs a title and an http(s) url."
+      configuration:
+        agent_missing: "Select an existing agent for Ask AI follow-ups."
+        agent_disabled: "The Ask AI follow-up agent must be enabled."
+        personal_messages_disabled: "The Ask AI follow-up agent must allow personal messages."
+        allowed_groups_missing: "The Ask AI follow-up agent must allow at least one group."
+    discover:
+      configuration:
+        cannot_enable: "Discover is deprecated and cannot be enabled after it has been disabled. Enable Ask AI instead."
+    post_image_captions:
+      errors:
+        description_blank: "Caption can't be blank."
+        description_too_long:
+          one: "Caption must be %{count} character or fewer."
+          other: "Caption must be %{count} characters or fewer."
+
+    share_ai:
+      read_more: "Read full transcript"
+      onebox_title: "AI Conversation with %{llm_name}"
+      formatted_excerpt: "AI Conversation with %{llm_name}:\n %{excerpt}"
+      title: "%{title} - AI Conversation - %{site_name}"
+      errors:
+        not_allowed: "You are not allowed to share this topic"
+        other_people_in_pm: "Personal messages with other humans cannot be shared publicly"
+        other_content_in_pm: "Personal messages containing posts from other people cannot be shared publicly"
+        failed_to_share: "Failed to share the conversation"
+        conversation_deleted: "Conversation share deleted successfully"
+    spam_detection:
+      flag_reason: "Flagged as spam by <a href='%{url}'>Discourse AI</a>"
+      silence_reason: "User silenced automatically by <a href='%{url}'>Discourse AI</a>"
+      invalid_error_type: "Invalid error type provided"
+      unexpected: "An unexpected error occurred"
+      bot_user_update_failed: "Failed to update the spam scanning bot user"
+      configuration_missing: "The AI spam detection configuration is missing. Add configuration in the 'Admin > Plugins > Discourse AI > Spam' before enabling."
+      logging_subject: "Spam detection"
+
+    ai_bot:
+      search_discourse_navigation:
+        not_allowed: "You are not allowed to search administration destinations."
+        invalid_query: "Enter a search query between 1 and %{max} characters."
+      navigation:
+        settings:
+          title: "Site settings"
+          description: "Search and change all site configuration settings."
+        users:
+          title: "Users"
+          description: "Find and manage member accounts and user permissions."
+        groups:
+          title: "Groups"
+          description: "Manage groups and group membership."
+        review:
+          title: "Review queue"
+          description: "Moderate flagged posts and approve pending users and content."
+        invites:
+          title: "Create an invite"
+          description: "Invite people to join this community."
+        categories:
+          title: "Categories"
+          description: "Browse, create, and manage discussion categories."
+        tags:
+          title: "Tags"
+          description: "Browse and manage topic tags."
+        themes:
+          title: "Themes"
+          description: "Install and customize themes to change the site's appearance and design."
+        authentication:
+          title: "Login and authentication"
+          description: "Configure login, signup, authentication, and single sign-on."
+        backups:
+          title: "Backups"
+          description: "Create, download, and restore site backups."
+      ai_users: "AI users"
+      ai_users_bio: "Automatic group of AI bot accounts"
+      errors:
+        agent_required: "Select an AI agent before sending your message"
+        agent_recipient_mismatch: "The selected AI agent does not match the conversation recipient"
+        agent_unavailable: "The selected AI agent is no longer available"
+        ambiguous_agent: "The conversation recipient matches more than one AI agent"
+        ambiguous_model: "Select a model to continue this conversation"
+        bot_disabled: "AI bot conversations are disabled"
+        bot_not_allowed: "You are not allowed to use AI bot conversations"
+        cannot_send_pm_to_agent: "You cannot send personal messages to this AI agent"
+        cannot_send_pm_to_model: "Language models cannot be personal message recipients. Select an AI agent instead."
+        invalid_agent_id: "The specified AI agent does not exist or you do not have access to it"
+        invalid_agent_modality: "The selected AI agent cannot be used in this conversation"
+        invalid_model_id: "The specified AI model is invalid"
+        model_conflicts_with_agent: "This AI agent is locked to a different model"
+        model_not_selectable: "The selected AI model is not available"
+        model_recipient_api_retired: "Models no longer have usernames. Select an AI agent as the conversation recipient."
+        model_unavailable: "The selected AI model is no longer available"
+        no_model_available: "No language model is configured for this AI agent"
+        no_user_for_agent: "The selected AI agent has no conversation user"
+        target_unavailable: "You can no longer reply in this conversation"
+      reply_error: "Sorry, it looks like our system encountered an unexpected issue while trying to reply.\n\n[details='Error details']\n%{details}\n[/details]"
+      context_preparation_error: "I could not safely prepare this conversation without losing history (%{reason}). Please retry. If this persists, start a new conversation with the needed context, reduce the latest request or tool output, or use a model with a larger context window."
+      default_pm_prefix: "[Untitled AI bot PM]"
+      thinking: "Thinking"
+      tool_pending_approval: "This action requires approval:"
+      spawn_agent:
+        description: "Delegate a self-contained prompt to one of the allowed agents and return its response"
+        prompt_description: "The complete self-contained prompt sent to the selected agent and shown in the thinking block"
+        summary: "Consulting %{agent}"
+        failed: "The delegated task could not be completed."
+        unknown_agent: "subagent"
+      read_post:
+        unknown_post: "post"
+      tool_errors:
+        invocation_limit_reached: "This tool has reached its configured invocation limit. Use the evidence already gathered."
+      subagent_errors:
+        invalid_agent: "The requested subagent is invalid."
+        invalid_prompt: "The delegated prompt is required."
+        prompt_too_long: "The delegated prompt is too long."
+        missing_user: "Delegation requires an originating user."
+        depth_limit: "The maximum delegation depth has been reached."
+        unavailable_parent: "The parent agent is no longer available."
+        agent_not_allowed: "The requested subagent is not allowed."
+        unavailable_agent: "The requested subagent is unavailable or inaccessible."
+        missing_model: "The requested subagent has no available language model."
+        call_limit: "The delegation call limit has been reached."
+        completion_limit: "The delegation completion limit has been reached."
+        token_limit: "The shared turn work allowance or child work allocation has been reached."
+        cancelled: "The delegated task was cancelled."
+        execution_failed: "The delegated task failed."
+        approval_unavailable: "Tools requiring approval are unavailable in delegated runs."
+      chat_tool_approval:
+        create_tag_title: "Create tag: %{name}"
+        create_tag_question: "Do you want to create this tag?"
+        create_category_title: "Create category: %{name}"
+        create_category_question: "Do you want to create this category?"
+        topic_status_label: "Changing status:"
+        topic_visibility_label: "Changing visibility:"
+        topic_solution_label: "Changing solution:"
+        topic_states:
+          open: "Open"
+          closed: "Closed"
+          active: "Active"
+          deleted: "Deleted"
+          listed: "Listed"
+          unlisted: "Unlisted"
+        no_solution: "No solution"
+        solution_post: "Post #%{number}"
+        mark_solution_question: "Do you want to mark %{post} as a solution?"
+        unmark_solution_question: "Do you want to remove %{post} as a solution?"
+        silence_title: "Silence user: @%{username}"
+        silence_question: "Do you want to silence this user?"
+        suspend_title: "Suspend user: @%{username}"
+        duration_label: "Duration:"
+        user_duration:
+          one: "%{count} day"
+          other: "%{count} days"
+        suspend_question: "Do you want to suspend this user?"
+        user_message: "Message to user"
+        post_states:
+          locked: "Locked"
+          unlocked: "Unlocked"
+        posts_destination_label: "Changing destination:"
+        posts_label: "Posts"
+        category_label: "Category"
+        post_title: "Editing post: %{post}"
+        post_reference: "%{topic} · post #%{number}"
+        post_content_label: "Changing content:"
+        post_topic_title_label: "Changing topic title:"
+        topic_title: "Editing topic: %{topic}"
+        topic_category_label: "Changing category:"
+        topic_tags_label: "Changing tags:"
+        no_tags: "No tags"
+        tag_title: "Editing tag: %{tag}"
+        setting_title: "Changing site setting: %{setting}"
+        setting_change_label: "Changing value:"
+        category_title: "Editing category: %{category}"
+        category_change_label:
+          name: "Changing name:"
+          description: "Changing description:"
+          color: "Changing color:"
+          text_color: "Changing text color:"
+        category_summary: "Edit category %{fields}"
+        category_fields:
+          name: "name"
+          description: "description"
+          color: "color"
+          text_color: "text color"
+        approve_label: "Yes"
+        reject_label: "No"
+        question: "Do you want to make this change?"
+        category_question: "Do you want to make this change to %{category}?"
+        category_change: "Changing `%{field}` from %{before} → %{after}"
+        empty_value: "Empty"
+        approved: "Approved by @%{username}."
+        rejected: "Rejected by @%{username}."
+        failed: "Could not complete the action: %{error}"
+        unexpected_error: "an unexpected error occurred"
+      agents:
+        forced_default_llm_required: "Select a default language model before requiring this agent to always use it."
+        bot_user_unsupported: "This agent is used internally by a feature and cannot have a bot user"
+        cannot_delete_system_agent: "System agents cannot be deleted, please disable it instead"
+        cannot_edit_system_agent: "System agents can only be renamed, you may not edit tools or system prompt, instead disable and make a copy"
+        cannot_have_duplicate_tools: "Can not have duplicate tools"
+        native_tool_requires_forced_llm: "Provider-native tools require a default LLM with \"Force default LLM\" enabled"
+        native_tool_unsupported_by_llm: "The selected default LLM does not support one of the enabled provider-native tools"
+        invalid_subagent_ids: "Subagent IDs must be a list of integers"
+        too_many_subagents: "An agent can have at most %{max} subagents"
+        too_many_rag_document_sources: "An agent can have at most %{max} URL sources"
+        subagent_self: "An agent cannot select itself as a subagent"
+        subagents_not_found: "The selected subagent IDs do not exist: %{ids}"
+        subagent_tool_collision: "An agent with subagents cannot configure a tool named spawn_agent"
+        admin_dashboard_highlights:
+          name: "Admin Dashboard Highlights"
+          description: "Writes the brief readout shown at the top of the admin dashboard, explaining what changed and what deserves attention this period"
+        github_helper:
+          name: "GitHub Helper"
+          description: "AI Bot specialized in assisting with GitHub-related tasks and questions"
+        general:
+          name: Forum Helper
+          description: "General purpose AI Bot capable of performing various tasks"
+        artist:
+          name: Artist
+          description: "AI Bot specialized in generating images"
+        designer:
+          name: Designer
+          description: "AI Bot specialized in generating and editing images"
+        forum_researcher:
+          name: Forum Researcher
+          description: "AI Bot specialized in deep research for the forum"
+        sql_helper:
+          name: SQL Helper
+          description: "AI Bot specialized in helping craft SQL queries on this Discourse instance"
+        settings_explorer:
+          name: Settings Explorer
+          description: "AI Bot specialized in helping explore Discourse site settings"
+        researcher:
+          name: Web Researcher
+          description: "AI Bot with Google access that can both search and read web pages"
+        creative:
+          name: Creative
+          description: "AI Bot with no external integrations specialized in creative tasks"
+        dall_e3:
+          name: "DALL-E 3"
+          description: "AI Bot specialized in generating images using DALL-E 3"
+        discourse_helper:
+          name: "Discourse Helper"
+          description: "AI Bot specialized in helping with Discourse related tasks"
+        discourse_admin_assistant:
+          name: "Discourse Admin Assistant"
+          description: "AI Bot that answers Discourse questions and helps administrators manage site settings"
+        web_artifact_creator:
+          name: "Web Artifact Creator"
+          description: "AI Bot specialized in creating interactive web artifacts"
+        summarizer:
+          name: "Summarizer"
+          description: "Default agent used to power AI summaries"
+        short_summarizer:
+          name: "Summarizer (short form)"
+          description: "Default agent used to power AI short summaries for topic lists' items"
+        concept_finder:
+          name: "Concept Finder"
+          description: "AI Bot specialized in identifying concepts and themes in content"
+        concept_matcher:
+          name: "Concept Matcher"
+          description: "AI Bot specialized in matching content against existing concepts"
+        concept_deduplicator:
+          name: "Concept Deduplicator"
+          description: "AI Bot specialized in deduplicating concepts"
+        custom_prompt:
+          name: "Custom prompt"
+          description: "Default agent powering the Helper's custom prompt feature"
+        smart_dates:
+          name: "Smart dates"
+          description: "Default agent powering the Helper's smart dates feature"
+        markdown_table_generator:
+          name: "Markdown table generator"
+          description: "Default agent powering the Helper's generate Markdown table feature"
+        post_illustrator:
+          name: "Post illustrator"
+          description: "Generates images to illustrate posts using available image generation tools"
+        proofreader:
+          name: "Proofreader"
+          description: "Default agent powering the Helper's proofread text feature"
+        titles_generator:
+          name: "Titles generator"
+          description: "Default agent powering the Helper's suggest topic titles feature"
+        tutor:
+          name: "Tutor"
+          description: "Default agent powering the Helper's explain feature"
+        translator:
+          name: "Translator"
+          description: "Default agent powering the Helper's translator feature"
+        image_captioner:
+          name: "Image captions"
+          description: "Default agent powering the image caption feature"
+        locale_detector:
+          name: "Locale detector"
+          description: "Powers the translation feature by detecting the locale of a given text (posts, titles, etc.)"
+        post_raw_translator:
+          name: "Post translator"
+          description: "Powers the translation feature by translating posts containing Discourse Markdown"
+        topic_title_translator:
+          name: "Topic title translator"
+          description: "Powers the translation feature by translating topic titles"
+        short_text_translator:
+          name: "Short text translator"
+          description: "Powers the translation feature by as a generic text translator, used for short texts like category names or tags"
+        spam_detector:
+          name: "Spam detector"
+          description: "Default agent powering our Spam detection feature"
+        content_creator:
+          name: "Content creator"
+          description: "Default agent powering HyDE search"
+        report_runner:
+          name: "Report runner"
+          description: "Default agent used in the report automation script"
+        discover:
+          name: "Discover"
+          description: "Default agent used in the discoveries feature (complimentary search)"
+        ask_ai_reporter:
+          name: "Ask AI reporter"
+          description: "Groups users’ questions into subjects for Ask AI dashboard reports."
+        ask_ai_synthesis:
+          name: "Ask AI Synthesis"
+          description: "Selects sources and prepares the answer shown by Ask AI"
+        ask_ai_query_rewriter:
+          name: "Ask AI query rewriter"
+          description: "Prepares keyword and semantic search queries for Ask AI"
+        chat_thread_titler:
+          name: "Chat Thread Titler"
+          description: "Default agent powering automatic chat thread title generation"
+        sentiment_classifier:
+          name: "Sentiment classifier"
+          description: "Default agent powering sentiment classification"
+        emotion_classifier:
+          name: "Emotion classifier"
+          description: "Default agent powering emotion classification"
+
+      topic_not_found: "Summary unavailable, topic not found!"
+      summarizing: "Summarizing topic"
+      searching: "Searching for: '%{query}'"
+      tool_options:
+        researcher:
+          researcher_llm:
+            name: "LLM"
+            description: "Language model to use for research (default to current agent's LLM)"
+          max_tokens_per_batch:
+            name: "Maximum tokens per batch"
+            description: "Maximum number of tokens to use for each batch in the research"
+          max_tokens_per_post:
+            name: "Maximum tokens per post"
+            description: "Maximum number of tokens to use for each post in the research"
+          max_results:
+            name: "Maximum number of results"
+            description: "Maximum number of results to include in a filter"
+          include_private:
+            name: "Include private"
+            description: "Include private topics in the filters"
+        create_artifact:
+          creator_llm:
+            name: "LLM"
+            description: "Language model to use for artifact creation"
+        update_artifact:
+          editor_llm:
+            name: "LLM"
+            description: "Language model to use for artifact edits"
+          update_algorithm:
+            name: "Update Algorithm"
+            description: "Ask LLM to fully replace, or use diff to update"
+          do_not_echo_artifact:
+            name: "Do Not Echo Artifact"
+            description: "Will limit costs however effectiveness of Artifact updates will be reduced"
+        google:
+          base_query:
+            name: "Base Search Query"
+            description: "Base query to use when searching. Examples: 'site:example.com' will only include results from example.com, before:2022-01-01 will only includes results from 2021 and earlier. This text is prepended to the search query."
+        read:
+          read_private:
+            name: "Read Private"
+            description: "Allow access to all topics user has access to (by default only public topics are included)"
+        read_post:
+          read_private:
+            name: "Read private"
+            description: "Allow access to posts the requesting user can see (by default only public posts are included)"
+          max_invocations:
+            name: "Maximum invocations"
+            description: "Maximum number of times this tool can run during one agent turn; leave blank for no limit"
+        search:
+          search_private:
+            name: "Search Private"
+            description: "Include all topics user has access to in search results (by default only public topics are included)"
+          max_results:
+            name: "Maximum number of results"
+            description: "Maximum number of results to include in the search - if empty default rules will be used and count will be scaled depending on model used. Highest value is 100."
+          base_query:
+            name: "Base Search Query"
+            description: "Base query to use when searching. Example: '#urgent' will prepend '#urgent' to the search query and only include topics with the urgent category or tag."
+          max_invocations:
+            name: "Maximum invocations"
+            description: "Maximum number of times this tool can run during one agent turn; leave blank for no limit"
+          ignore_user_filter:
+            name: "Ignore user filter"
+            description: "Ignore usernames supplied by the model so searches can find misattributed content"
+          absolute_urls:
+            name: "Absolute URLs"
+            description: "Return complete source URLs instead of forum-relative paths"
+        flag_post:
+          flag_type:
+            name: "Flag Type"
+            description: "Controls whether the post is reviewed, hidden, deleted, or treated as spam."
+      native_tools:
+        web_search:
+          name: "Web Search (native)"
+          help: "Lets the model search the web using the provider's built-in search, when the agent is forced to a supported LLM."
+        web_fetch:
+          name: "Web Fetch (native)"
+          help: "Lets the model open and read web pages using the provider's built-in web access, when the agent is forced to a supported LLM."
+        google_maps:
+          name: "Google Maps (native)"
+          help: "Lets the model use current Google Maps place and location data, when the agent is forced to a supported Gemini LLM."
+        code_execution:
+          name: "Code execution (native)"
+          help: "Lets the model write and run Python code in the provider's sandbox, when the agent is forced to a supported Gemini LLM."
+      tool_summary:
+        load_discourse_website_page: "Load Discourse website page"
+        read_artifact: "Read a web artifact"
+        search_uploaded_documents: "Search uploaded documents"
+        view_image: "Inspect image"
+        update_artifact: "Update a web artifact"
+        create_artifact: "Create web artifact"
+        web_browser: "Browse Web"
+        github_search_files: "GitHub search files"
+        github_search_code: "GitHub code search"
+        github_file_content: "GitHub file content"
+        github_diff: "GitHub diff"
+        random_picker: "Random Picker"
+        categories: "List categories"
+        users: "List users"
+        flag_post: "Flag post"
+        close_topic: "Close topic"
+        suspend_user: "Suspend user"
+        silence_user: "Silence user"
+        unlist_topic: "Unlist topic"
+        lock_post: "Lock post"
+        delete_topic: "Delete topic"
+        edit_post: "Edit post"
+        change_topic_tags: "Edit topic tags"
+        create_tag: "Create tag"
+        edit_tag: "Edit tag"
+        create_category: "Create category"
+        edit_category: "Edit category"
+        change_topic_category: "Change topic category"
+        set_topic_timer: "Set topic timer"
+        set_slow_mode: "Set slow mode"
+        move_posts: "Move posts"
+        grant_badge: "Grant badge"
+        list_reviewables: "List review queue"
+        perform_reviewable_action: "Review queue action"
+        add_reviewable_note: "Add review queue note"
+        assign: "Assign topic"
+        mark_as_solved: "Mark as solved"
+        search: "Search"
+        tags: "List tags"
+        time: "Time"
+        summarize: "Summarize"
+        set_topic_summary: "Set topic summary"
+        image: "Generate image"
+        google: "Search Google"
+        read: "Read topic"
+        read_post: "Read post"
+        setting_context: "Look up site setting context"
+        schema: "Look up database schema"
+        search_settings: "Searching site settings"
+        search_discourse_navigation: "Searching site navigation"
+        read_site_setting: "Read site setting"
+        change_site_setting: "Change site setting"
+        dall_e: "Generate image"
+        search_meta_discourse: "Search Meta Discourse"
+        javascript_evaluator: "Evaluate JavaScript"
+        create_image: "Creating image"
+        edit_image: "Editing image"
+        researcher: "Researching"
+        researcher_dry_run: "Preparing research"
+      tool_help:
+        load_discourse_website_page: "Load a named page from the official Discourse website"
+        read_artifact: "Read a web artifact using the AI Bot"
+        search_uploaded_documents: "Search documents uploaded to this agent"
+        view_image: "Inspect an image available during this task"
+        update_artifact: "Update a web artifact using the AI Bot"
+        create_artifact: "Create a web artifact using the AI Bot"
+        web_browser: "Browse web page using the AI Bot"
+        github_search_code: "Search for code in a GitHub repository"
+        github_search_files: "Search for files in a GitHub repository"
+        github_file_content: "Retrieve content of files from a GitHub repository"
+        github_diff: "Retrieve a GitHub pull request or commit diff"
+        random_picker: "Pick a random number or a random element of a list"
+        categories: "List all publicly visible categories on the forum"
+        users: "List users on the forum"
+        flag_post: "Flag the current post for staff review"
+        close_topic: "Close or open a topic"
+        suspend_user: "Suspend (ban) a user, blocking them from logging in or posting"
+        silence_user: "Silence a user, blocking them from posting while they can still read"
+        unlist_topic: "List or unlist a topic"
+        lock_post: "Lock or unlock a post"
+        delete_topic: "Delete a topic"
+        edit_post: "Edit the content of a post"
+        change_topic_tags: "Edit the tags on a topic"
+        create_tag: "Create a new tag"
+        edit_tag: "Rename a tag or change its description"
+        create_category: "Create a new category"
+        edit_category: "Edit an existing category's name, description, or colors"
+        change_topic_category: "Move a topic to a different category"
+        set_topic_timer: "Set a timer on a topic to close, open, delete, or bump it"
+        set_slow_mode: "Enable or disable slow mode on a topic"
+        move_posts: "Move posts to a new or existing topic"
+        grant_badge: "Grant a badge to a user"
+        list_reviewables: "List pending review queue items with optional filtering"
+        perform_reviewable_action: "Perform an action on a review queue item"
+        add_reviewable_note: "Add a note to a review queue item"
+        assign: "Assign or unassign a topic to a user or group"
+        mark_as_solved: "Mark or unmark a post as the accepted solution"
+        search: "Search all public topics on the forum"
+        tags: "List all tags on the forum"
+        time: "Find time in various time zones"
+        summary: "Summarize a topic"
+        set_topic_summary: "Set the final short topic summary"
+        image: "Generate image using Stable Diffusion"
+        create_image: "Generate image using Open AI GPT image model"
+        edit_image: "Edit image using Open AI GPT image model"
+        google: "Search Google for a query"
+        read: "Read public topic on the forum"
+        read_post: "Read one exact post on the forum"
+        setting_context: "Look up site setting context"
+        schema: "Look up database schema"
+        search_settings: "Search site settings"
+        search_discourse_navigation: "Find verified links to available pages on this site"
+        read_site_setting: "Read the current value of a site setting"
+        change_site_setting: "Change the value of a site setting"
+        dall_e: "Generate image using DALL-E 3"
+        search_meta_discourse: "Search Meta Discourse"
+        javascript_evaluator: "Evaluate JavaScript"
+        researcher: "Research forum information using the AI Bot"
+      tool_description:
+        load_discourse_website_page: "Loaded the %{page_name} page from the official Discourse website"
+        read_artifact: "Read a web artifact using the AI Bot"
+        view_image: "Inspected an image available during this task"
+        search_uploaded_documents:
+          one: "Found %{count} uploaded document excerpt for '%{query}'"
+          other: "Found %{count} uploaded document excerpts for '%{query}'"
+        update_artifact: "Updated a web artifact using the AI Bot"
+        create_artifact: "Created a web artifact: %{name} - %{specification}"
+        web_browser: "Reading <a href='%{url}'>%{url}</a>"
+        github_search_files: "Searched for '%{keywords}' in %{repo}/%{branch}"
+        github_search_code: "Searched for '%{query}' in %{repo}"
+        github_diff: "<a href='%{url}'>%{repo} %{ref}</a>"
+        github_file_content: "Retrieved content of %{file_paths} from %{repo_name}@%{branch}"
+        random_picker: "Picking from %{options}, picked: %{result}"
+        flag_post: "Flagging post %{post_id} (flag_post: %{flag_post})"
+        close_topic: "Closing topic %{topic_id} (closed: %{closed})"
+        suspend_user: "Suspending %{username} for %{duration_days} day(s)"
+        silence_user: "Silencing %{username} for %{duration_days} day(s)"
+        unlist_topic: "Unlisting topic %{topic_id} (unlisted: %{unlisted})"
+        lock_post: "Locking post %{post_id} (locked: %{locked})"
+        delete_topic: "Deleting topic %{topic_id} (deleted: %{deleted})"
+        edit_post: "Editing post %{post_id}"
+        change_topic_tags: "Editing tags on topic %{topic_id}: %{tags}"
+        create_tag: "Creating tag '%{name}'"
+        edit_tag: "Editing tag '%{name}' (%{fields})"
+        create_category: "Creating category '%{name}'"
+        edit_category: "Editing %{fields} for %{category_name}"
+        change_topic_category: "Moving topic %{topic_id} to category %{category_id}"
+        set_topic_timer: "Setting %{timer_type} timer on topic %{topic_id} (%{duration_hours}h)"
+        set_slow_mode: "Setting slow mode on topic %{topic_id} (%{slow_mode_seconds}s)"
+        move_posts: "Moving posts %{post_ids} from topic %{topic_id}"
+        grant_badge: "Granting badge '%{badge_name}' to %{username}"
+        list_reviewables: "Listing review queue items (type: %{type})"
+        perform_reviewable_action: "Performing %{action} on reviewable %{reviewable_id}"
+        add_reviewable_note: "Adding note to reviewable %{reviewable_id}"
+        assign: "Assigning topic %{topic_id} (assigned: %{assigned})"
+        mark_as_solved: "Marking post %{post_id} as solved (solved: %{solved})"
+        read: "Reading: <a href='%{url}'>%{title}</a>"
+        read_post: "Reading post: <a href='%{url}'>%{title}</a>"
+        time: "Time in %{timezone} is %{time}"
+        summarize: "Summarized <a href='%{url}'>%{title}</a>"
+        set_topic_summary: "Set the final short topic summary"
+        dall_e: "%{prompt}"
+        create_image: "%{prompt}"
+        edit_image: "%{prompt}"
+        image: "%{prompt}"
+        categories:
+          one: "Found %{count} category"
+          other: "Found %{count} categories"
+        users:
+          one: "Found %{count} user"
+          other: "Found %{count} users"
+        tags:
+          one: "Found %{count} tag"
+          other: "Found %{count} tags"
+        search:
+          one: "Found %{count} <a href='%{url}'>result</a> for '%{query}'"
+          other: "Found %{count} <a href='%{url}'>results</a> for '%{query}'"
+        search_meta_discourse:
+          one: "Found %{count} <a href='%{url}'>result</a> for '%{query}'"
+          other: "Found %{count} <a href='%{url}'>results</a> for '%{query}'"
+        google:
+          one: "Found %{count} <a href='%{url}'>result</a> for '%{query}'"
+          other: "Found %{count} <a href='%{url}'>results</a> for '%{query}'"
+        setting_context: "Reading context for: %{setting_name}"
+        schema: "%{tables}"
+        researcher_dry_run:
+          one: "Proposed goals: %{goals}\n\nFound %{count} post matching '%{filter}'"
+          other: "Proposed goals: %{goals}\n\nFound %{count} posts matching '%{filter}'"
+        researcher:
+          one: "Researching: %{goals}\n\nFound %{count} post matching '%{filter}'"
+          other: "Researching: %{goals}\n\nFound %{count} posts matching '%{filter}'"
+        search_settings:
+          one: "Found %{count} result for '%{query}'"
+          other: "Found %{count} results for '%{query}'"
+        search_discourse_navigation:
+          one: "Found %{count} destination"
+          other: "Found %{count} destinations"
+        read_site_setting: "Reading site setting %{setting_name}"
+        change_site_setting: "Changing site setting %{setting_name} to '%{value}'"
+      discoveries:
+        errors:
+          invalid_query: "Enter a search query between 1 and %{max} characters."
+          invalid_request_id: "The discovery request ID is invalid."
+          request_conflict: "This discovery request ID is already being used for another query."
+          processing_failed: "Ask AI could not complete this search."
+          temporarily_unavailable: "Ask AI is busy right now. Try again shortly."
+          credits_unavailable: "Ask AI is unavailable until AI credits reset."
+          follow_up_failed: "The follow-up conversation could not be created."
+          invalid_follow_up: "Enter a follow-up question with no more than %{max} characters."
+          result_expired: "This discovery is no longer available. Search again to ask a follow-up."
+        continue_conversation:
+          title: "Ask AI conversation: Search for %{query}"
+          sources: "Selected discussions:\n%{sources}"
+          source: "- [%{title}](%{url})"
+
+      flag_post:
+        errors:
+          no_context: "No post context available for flagging."
+          no_reason: "A reason is required to flag a post."
+          invalid_flag_type: "Invalid flag type."
+        skipped: "Verdict was false; no flag was created."
+        already_flagged: "Post is already flagged for review."
+        flagged: "Post flagged for review."
+        reason: "AI bot flagged this post.\n\nReason: %{reason}"
+        score_reason: "AI bot flagged this post."
+
+      close_topic:
+        errors:
+          not_found: "Topic not found."
+          not_allowed: "You are not allowed to close or open this topic."
+          no_reason: "A reason is required to close or open a topic."
+        success: "Topic updated successfully."
+
+      suspend_user:
+        errors:
+          not_found: "User not found."
+          not_allowed: "You are not allowed to suspend this user."
+          no_reason: "A reason is required to suspend a user."
+          invalid_duration: "Duration must be a positive whole number of days, up to %{max}."
+          failed: "Failed to suspend user."
+        success: "User %{username} has been suspended."
+
+      silence_user:
+        errors:
+          not_found: "User not found."
+          not_allowed: "You are not allowed to silence this user."
+          no_reason: "A reason is required to silence a user."
+          invalid_duration: "Duration must be a positive whole number of days, up to %{max}."
+          failed: "Failed to silence user."
+        success: "User %{username} has been silenced."
+
+      unlist_topic:
+        errors:
+          not_found: "Topic not found."
+          not_allowed: "You are not allowed to unlist or list this topic."
+          no_reason: "A reason is required to unlist or list a topic."
+        success: "Topic updated successfully."
+
+      lock_post:
+        errors:
+          not_found: "Post not found."
+          not_allowed: "You are not allowed to lock or unlock this post."
+          no_reason: "A reason is required to lock or unlock a post."
+        success: "Post updated successfully."
+
+      delete_topic:
+        errors:
+          not_found: "Topic not found."
+          not_allowed: "You are not allowed to delete or recover this topic."
+          no_reason: "A reason is required to delete or recover a topic."
+        success: "Topic updated successfully."
+
+      edit_post:
+        errors:
+          not_found: "Post not found."
+          not_allowed: "You are not allowed to edit this post."
+          nothing_to_edit: "Either raw or title must be provided."
+          no_reason: "An edit reason is required."
+          revision_failed: "Failed to revise the post."
+        success: "Post edited successfully."
+
+      change_topic_tags:
+        errors:
+          not_found: "Topic not found."
+          not_allowed: "You are not allowed to edit tags on this topic."
+          no_reason: "A reason is required to edit tags."
+          tagging_disabled: "Tagging is not enabled on this site."
+        success: "Tags updated successfully."
+
+      create_tag:
+        errors:
+          tagging_disabled: "Tagging is not enabled on this site."
+          no_name: "A name is required to create a tag."
+          already_exists: "A tag named '%{name}' already exists."
+          not_allowed: "You are not allowed to create tags."
+          no_reason: "A reason is required to create a tag."
+        success: "Tag '%{name}' created successfully."
+
+      edit_tag:
+        errors:
+          tagging_disabled: "Tagging is not enabled on this site."
+          not_found: "Tag not found."
+          not_allowed: "You are not allowed to edit this tag."
+          nothing_to_edit: "Either new_name or description must be provided."
+          invalid_new_name: "'%{name}' is not a valid tag name."
+          no_reason: "A reason is required to edit a tag."
+        success: "Tag '%{name}' updated successfully."
+
+      create_category:
+        errors:
+          no_name: "A name is required to create a category."
+          not_allowed: "You are not allowed to create categories."
+          parent_not_found: "Parent category not found."
+          no_reason: "A reason is required to create a category."
+        success: "Category '%{name}' created successfully."
+
+      edit_category:
+        errors:
+          not_found: "Category not found."
+          not_allowed: "You are not allowed to edit this category."
+          nothing_to_edit: "At least one of name, description, color, or text_color must be provided."
+          no_reason: "A reason is required to edit a category."
+        success: "Category '%{name}' updated successfully."
+
+      change_topic_category:
+        errors:
+          not_found: "Topic not found."
+          not_allowed: "You are not allowed to move this topic."
+          category_not_found: "Category not found."
+          no_reason: "A reason is required to move a topic."
+          revision_failed: "Failed to move the topic."
+        success: "Topic moved successfully."
+
+      set_topic_timer:
+        errors:
+          not_found: "Topic not found."
+          not_allowed: "You are not allowed to set a timer on this topic."
+          no_reason: "A reason is required to set a topic timer."
+          invalid_timer_type: "Invalid timer type. Must be one of: close, open, delete, silent_close, bump."
+        success: "Topic timer updated successfully."
+
+      set_slow_mode:
+        errors:
+          not_found: "Topic not found."
+          not_allowed: "You are not allowed to set slow mode on this topic."
+          no_reason: "A reason is required to set slow mode."
+        success: "Slow mode updated successfully."
+
+      move_posts:
+        errors:
+          not_found: "Topic not found."
+          not_allowed: "You are not allowed to move posts in this topic."
+          no_reason: "A reason is required to move posts."
+          no_posts: "No post IDs provided."
+          no_destination: "Either destination_topic_id or new_title must be provided."
+          move_failed: "Failed to move posts."
+        success: "Posts moved successfully."
+
+      grant_badge:
+        errors:
+          user_not_found: "User not found."
+          badge_not_found: "Badge not found."
+          not_allowed: "You are not allowed to grant badges."
+          no_reason: "A reason is required to grant a badge."
+          badge_disabled: "Badge is not enabled."
+          grant_failed: "Failed to grant badge."
+        success: "Badge granted successfully."
+
+      assign:
+        errors:
+          plugin_not_installed: "The discourse-assign plugin is not installed."
+          not_found: "Topic not found."
+          not_allowed: "You are not allowed to assign this topic."
+          no_reason: "A reason is required to assign or unassign a topic."
+          assignee_not_found: "User or group not found."
+          assign_failed: "Failed to assign topic."
+        success: "Topic assignment updated successfully."
+
+      mark_as_solved:
+        errors:
+          plugin_not_installed: "The discourse-solved plugin is not installed."
+          no_reason: "A reason is required to mark or unmark a post as solved."
+          action_failed: "Failed to update the solved status."
+        success: "Solved status updated successfully."
+
+      list_reviewables:
+        errors:
+          not_allowed: "You are not allowed to view the review queue"
+          invalid_type: "Invalid reviewable type"
+          invalid_status: "Invalid status. Must be one of: pending, approved, rejected, ignored, deleted, reviewed, all."
+        empty: "No review queue items found matching the given filters"
+        found:
+          one: "Found %{count} review queue item"
+          other: "Found %{count} review queue items"
+
+      perform_reviewable_action:
+        errors:
+          not_allowed: "You are not allowed to access the review queue"
+          not_found: "Review queue item not found"
+          no_reason: "A reason is required to perform an action on a review queue item"
+          invalid_action: "Invalid action '%{action}'. Available actions: %{available}"
+          conflict: "This review queue item was updated by someone else. Please try again"
+          action_failed: "Failed to perform the action"
+        success: "Successfully performed '%{action}' on review queue item %{reviewable_id}"
+
+      add_reviewable_note:
+        errors:
+          not_allowed: "You are not allowed to access the review queue"
+          not_found: "Review queue item not found"
+          no_note: "A note is required to add a note to a review queue item"
+          failed: "Failed to add the note"
+        success: "Successfully added a note to review queue item %{reviewable_id}"
+
+      change_site_setting:
+        errors:
+          no_reason: "A reason is required to change a site setting."
+          not_found: "Site setting '%{setting_name}' does not exist."
+          not_allowed: "You are not allowed to change site settings."
+          hidden: "Site setting '%{setting_name}' is hidden and cannot be changed here."
+          secret: "Site setting '%{setting_name}' contains a secret and cannot be changed here."
+          themeable: "Site setting '%{setting_name}' requires a theme and cannot be changed here."
+          deprecated: "Site setting '%{setting_name}' is deprecated; use '%{new_name}' instead."
+          shadowed: "Site setting '%{setting_name}' is overridden globally and cannot be changed."
+          unconfigurable: "Site setting '%{setting_name}' belongs to a plugin that cannot be configured."
+          unsupported_type: "Site settings of type '%{type}' cannot be changed by the AI bot."
+          invalid_value: "Invalid value: %{error}"
+          failed: "Failed to change the site setting."
+        success: "Site setting %{setting_name} has been changed to '%{value}'."
+      read_site_setting:
+        errors:
+          not_allowed: "You are not allowed to read site settings."
+          not_found: "Site setting '%{setting_name}' does not exist."
+          hidden: "Site setting '%{setting_name}' is hidden and cannot be read here."
+          secret: "Site setting '%{setting_name}' contains a secret and cannot be read here."
+          themeable: "Site setting '%{setting_name}' requires a theme and cannot be read here."
+      load_discourse_website_page:
+        errors:
+          page_not_found: "The Discourse website page '%{page_name}' is not available."
+          fetch_failed: "The '%{page_name}' page from the official Discourse website could not be loaded."
+
+    reviewables:
+      ai_tool_action:
+        title: "AI Tool Action"
+        approve:
+          title: "Approve"
+        reject:
+          title: "Reject"
+        target_missing: "The tool action target no longer exists."
+        tool_not_found: "Tool '%{tool_name}' is no longer available."
+        bot_user_missing: "The bot user no longer exists."
+        performer_not_human: "This action must be approved or rejected by a real person, not a bot."
+        post_mismatch: "This approval card does not belong to this post."
+        execution_error: "Tool execution failed: %{error}"
+        execution_error_unknown: "an unexpected error occurred"
+
+    summarization:
+      published_summary_heading: "AI-generated summary"
+      configuration:
+        backfill_required: "Set 'ai summary backfill maximum topics per hour' above 0 first, so summaries shown to crawlers stay up to date."
+      configuration_hint:
+        one: "Configure the `%{setting}` setting first."
+        other: "Configure these settings first: %{settings}"
+      chat:
+        no_targets: "There were no messages during the selected period."
+
+    sentiment:
+      reports:
+        overall_sentiment: "Overall sentiment (Positive - Negative)"
+        post_emotion:
+          sadness: "Sadness 😢"
+          surprise: "Surprise 😱"
+          neutral: "Neutral 😐"
+          fear: "Fear 😨"
+          anger: "Anger 😡"
+          joy: "Joy 😀"
+          disgust: "Disgust 🤢"
+        sentiment_analysis:
+          positive: "Positive"
+          negative: "Negative"
+          neutral: "Neutral"
+
+    discord:
+      configuration:
+        agent_user_required: "The Discord search agent must have an associated user before Discord agent mode can be enabled."
+
+    llm:
+      user_association_is_legacy_only: "can only be retained or cleared for an existing model"
+      configuration:
+        create_llm: "You need to setup an LLM before enabling this feature"
+        disable_modules_first: "You must disable these modules first: %{settings}"
+        set_llm_first: "Set %{setting} first"
+        model_unreachable: "We couldn't get a response from this model. Check your settings first."
+        empty_response: "The model returned an empty response."
+        invalid_seeded_model: "You can't use this model with this feature"
+        invalid_agent_response_format: "The selected agent must have a response format with a boolean field names \"spam\""
+        must_select_model: "You must select a LLM first"
+        invalid_llm_id: "The selected LLM model is not valid"
+      endpoints:
+        not_configured: "%{display_name} (not configured)"
+        configuration_hint:
+          one: "Make sure the `%{settings}` setting was configured."
+          other: "Make sure these settings were configured: %{settings}"
+
+      delete_failed:
+        one: "We couldn't delete this model because %{settings} is using it. Update the setting and try again."
+        other: "We couldn't delete this model because %{settings} are using it. Update the settings and try again."
+      cannot_edit_builtin: "You can't edit a built-in model."
+
+    agents:
+      malformed_examples: "The given examples have the wrong format."
+
+    embeddings:
+      delete_failed: "This model is currently in use. Update the `ai embeddings selected model` first."
+      cannot_edit_builtin: "You can't edit a built-in model."
+      secret_required: "A credential must be selected"
+      secret_not_found: "The selected credential does not exist"
+      configuration:
+        disable_embeddings: "You have to disable 'ai embeddings enabled' first."
+        choose_model: "Set 'ai embeddings selected model' first."
+        model_test_failed: "We failed to generate a test embedding with this model. Check it's correctly configured."
+
+    decision_models:
+      custom_headers:
+        invalid_format: "must be an array of header name and value pairs"
+        too_many: "cannot contain more than %{count} entries"
+        unsupported_provider: "are only supported for System One and TypeSafe models"
+        invalid_name: "must have valid HTTP names of at most %{name_length} characters"
+        invalid_value: "must have printable ASCII values of at most %{value_length} characters"
+        reserved_name: "cannot override reserved transport or authentication headers"
+        duplicate_name: "must have unique names (case-insensitive)"
+      secret_not_found: "The selected credential does not exist"
+      invalid_url: "must be an http:// or https:// URL, or an srv:// URL without a port"
+      test_refused: "The decision model declined to answer the test question."
+      test_image_not_read: "The decision model did not recognise the test image. Untick \"Supports image input\" if it cannot read images."
+      credit_limit_exceeded: "%{model_name} has used all of today's AI credits. Credits reset in %{reset_time}."
+      cannot_modify_seeded: "Pre-configured decision models cannot be edited or deleted."
+
+    secrets:
+      delete_failed_in_use: "This credential is currently in use by one or more LLMs, embeddings, decision models, or tools and cannot be deleted."
+
+    llm_models:
+      missing_provider_param: "%{param} can't be blank"
+      invalid_provider_param: "%{param} has an invalid format"
+      reasoning_mode_requirements: "Pro reasoning mode requires the Responses API"
+      secret_required: "A credential must be selected"
+      secret_not_found: "The selected credential does not exist"
+      bedrock_invalid_url: "Please complete all the fields to use this model."
+      bedrock_missing_auth: "AWS Bedrock requires either Access Key ID or Role ARN to be configured"
+      native_vision_cannot_delegate: "Native image input cannot use another vision model"
+      vision_model_required: "A vision model must be selected"
+      vision_model_not_found: "The selected vision model does not exist"
+      vision_model_cannot_be_self: "A model cannot use itself as its vision model"
+      vision_model_must_be_native: "The selected vision model must support native image input"
+      vision_model_has_dependents: "This model provides vision for: %{models}. Reconfigure those models first."
+
+    ai_staff_action_logger:
+      updated: "updated"
+      set: "set"
+      removed: "removed"
+
+    translation:
+      errors:
+        disabled: "The AI translation feature is not fully configured."
+        all_posts_translated: "All posts in this topic are already translated."
+
+    llm_credit_allocation:
+      limit_exceeded_user: "This community has reached its AI credit limit for today. Please try again after %{reset_time} or contact your site administrator for more information."
+      limit_exceeded_admin: "You have reached your AI credit limit. Please try again after %{reset_time}."
+
+    errors:
+      quota_exceeded: "You have exceeded the quota for this model. Please try again in %{relative_time}."
+      quota_required: "You must specify maximum tokens, uses, or cost for this model"
+      no_query_specified: The query parameter is required, please specify it.
+      no_user_for_agent: The agent specified does not have a user associated with it.
+      agent_not_found: "The agent specified does not exist. Check the agent_name or agent_id params (legacy: persona_name or persona_id)."
+      no_user_specified: The username or the user_unique_id parameter is required, please specify it.
+      user_not_found: The user specified does not exist. Check the username param.
+      agent_disabled: "The agent specified is disabled. Check the agent_name or agent_id params (legacy: persona_name or persona_id)."
+      no_default_llm: No default language model is available. Configure a model for the agent or site.
+      user_not_allowed: The user is not allowed to participate in the topic.
+      invalid_stream_resume_token: The resume_token is invalid or has expired.
+      no_tool_results_specified: The tool_results parameter is required when resuming a stream.
+      invalid_custom_tools: "The custom_tools parameter is invalid: %{details}"
+      duplicate_custom_tools: "The custom_tools parameter contains duplicate tool names: %{names}"
+      too_many_custom_tools: "The custom_tools parameter can include at most %{max} tools."
+      custom_tool_definition_too_large: "Each custom tool definition must be at most %{max} bytes."
+      invalid_stream_param: "The %{key} parameter is invalid: %{details}"
+      expected_array: "expected an array"
+      expected_object: "expected an object"
+      ambiguous_tool_results: "Specify either tool_results or tool_result, not both."
+      invalid_tool_results: "The tool_results parameter is invalid: %{details}"
+      too_many_tool_results: "The tool_results parameter can include at most %{max} items."
+      no_pending_tool_calls: There are no pending tool calls for this resume token.
+      missing_tool_results: "Missing tool results for tool_call_id(s): %{ids}"
+      unexpected_tool_results: "Unexpected tool results for tool_call_id(s): %{ids}"
+      invalid_tool_result_content: "The tool result for %{id} must include content"
+      tool_result_content_too_large: "Each tool result content payload must be at most %{max} bytes."
+      stream_reply_max_resume_rounds_reached: Reached maximum custom tool resume rounds (%{max}).
+      stream_reply_state_too_large: "The stream state is too large to persist (max %{max} bytes)."
+      stream_reply_unexpected_error: An unexpected error occurred while streaming the reply.
+      prompt_message_length: The message %{idx} is over the 1000 character limit.
+      agent_already_exists: Agent with the name %{name} already exists.
+      custom_tool_exists:
+        one: "Custom tool with the name %{names} already exists."
+        other: "Custom tools with the names %{names} already exist."
+      mcp_server_missing: "The following MCP servers are not configured on this site: %{names}."
+      subagents_missing: "The following subagents are not configured on this site: %{names}."
+      mcp_server_tools_not_found: "No matching tools from MCP server %{name} are available on this site."

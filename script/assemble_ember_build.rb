@@ -1,0 +1,172 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+# rubocop:disable Discourse/NoChdir
+
+require "bundler/setup"
+require "fileutils"
+require "tempfile"
+require "open3"
+require "json"
+require "time"
+require "parallel"
+
+require_relative "../lib/version"
+
+DOWNLOAD_PRE_BUILT_ASSETS = ENV["DISCOURSE_DOWNLOAD_PRE_BUILT_ASSETS"] != "0"
+DOWNLOAD_TEMP_FILE = "#{__dir__}/../tmp/assets.tar.gz"
+DOWNLOAD_EXTRACT_DIR = "#{__dir__}/../tmp/extracted_assets"
+
+PRE_BUILD_ROOT = "https://get.discourse.org/discourse-assets"
+
+JS_SOURCE_PATHS = %w[frontend package.json pnpm-lock.yaml]
+
+EMBER_APP_DIR = "frontend/discourse"
+BUILD_INFO_FILE = "#{EMBER_APP_DIR}/dist/BUILD_INFO.json"
+
+Dir.chdir("#{__dir__}/..")
+
+def capture(*args)
+  output, status = Open3.capture2(*args)
+  raise "Command failed: #{args.inspect}" if status != 0
+  output
+end
+
+def log(message)
+  STDERR.puts "[assemble_ember_build] #{message}"
+end
+
+# Returns a git tree-hash representing the current state of Discourse core JS source paths.
+# Only files in JS_SOURCE_PATHS are included in the tree hash.
+def core_tree_hash
+  Tempfile.create do |f|
+    f.close
+
+    git_dir = capture("git", "rev-parse", "--git-dir").strip
+    FileUtils.cp "#{git_dir}/index", f.path
+
+    env = { "GIT_INDEX_FILE" => f.path }
+
+    # Remove all files from the index, then add only JS_SOURCE_PATHS
+    system(env, "git", "rm", "-r", "--cached", ".", "--quiet", exception: true)
+    system(env, "git", "add", *JS_SOURCE_PATHS, exception: true)
+
+    capture(env, "git", "write-tree").strip
+  end
+end
+
+def resolved_ember_env
+  ENV["EMBER_ENV"] || "development"
+end
+
+def ci_minify?
+  ENV["DISCOURSE_CI_MINIFY"] == "1"
+end
+
+def build_info
+  info = { "ember_env" => resolved_ember_env, "core_tree_hash" => core_tree_hash }
+  info["ci_minify"] = true if ci_minify?
+  info
+end
+
+def existing_core_build_usable?
+  if !File.exist?(BUILD_INFO_FILE)
+    log "No existing build info file found."
+    return false
+  end
+
+  existing = JSON.parse(File.read(BUILD_INFO_FILE))
+  expected = build_info
+
+  if existing == expected
+    true
+  else
+    log <<~MSG
+      Existing build is not reusable.
+      - Existing: #{existing.inspect}
+      - Current: #{expected.inspect}
+    MSG
+    false
+  end
+end
+
+def download_prebuild_assets!
+  return false if !DOWNLOAD_PRE_BUILT_ASSETS
+
+  status_output = capture("git", "status", "--porcelain", *JS_SOURCE_PATHS).strip
+  git_is_clean = status_output.empty?
+  if !git_is_clean
+    log "JS-related files in the git working directory have been changed. Skipping download of prebuilt assets."
+    return false
+  end
+
+  core_commit_hash = capture("git", "rev-parse", "HEAD").strip
+  version_string = "#{Discourse::VERSION::STRING}-#{core_commit_hash.slice(0, 8)}"
+
+  url = "#{PRE_BUILD_ROOT}/#{version_string}/#{resolved_ember_env}.tar.gz"
+  puts "Fetching and extracting #{url}..."
+
+  begin
+    system("curl", "--fail-with-body", "-L", url, "-o", DOWNLOAD_TEMP_FILE, exception: true)
+  rescue RuntimeError => e
+    log "Failed to download prebuilt assets: #{e.message}"
+    return false
+  end
+
+  FileUtils.mkdir_p(DOWNLOAD_EXTRACT_DIR)
+  begin
+    system("tar", "-xzf", DOWNLOAD_TEMP_FILE, "-C", DOWNLOAD_EXTRACT_DIR, exception: true)
+  rescue RuntimeError => e
+    log "Failed to extract prebuilt assets: #{e.message}"
+    return false
+  end
+
+  FileUtils.rm_rf("#{EMBER_APP_DIR}/dist")
+  FileUtils.mv("#{DOWNLOAD_EXTRACT_DIR}/core", "#{EMBER_APP_DIR}/dist")
+
+  FileUtils.rm_rf("app/assets/generated")
+  FileUtils.mv("#{DOWNLOAD_EXTRACT_DIR}/plugins", "./app/assets/generated")
+
+  puts "Prebuilt assets downloaded and extracted successfully."
+  true
+ensure
+  FileUtils.rm_f(DOWNLOAD_TEMP_FILE) if File.exist?(DOWNLOAD_TEMP_FILE)
+  FileUtils.rm_rf(DOWNLOAD_EXTRACT_DIR) if File.exist?(DOWNLOAD_EXTRACT_DIR)
+end
+
+build_cmd = %w[pnpm build]
+build_env = { "CI" => "1", "SKIP_DB_AND_REDIS" => "1" }
+
+core_build_reusable =
+  existing_core_build_usable? ||
+    (!ci_minify? && download_prebuild_assets! && existing_core_build_usable?)
+
+if core_build_reusable
+  log "Reusing existing core ember build. All done."
+else
+  log "Running full core build..."
+  system(build_env, *build_cmd, exception: true, chdir: EMBER_APP_DIR)
+  File.write(BUILD_INFO_FILE, JSON.pretty_generate(build_info))
+end
+
+build_plugin_env = { "SKIP_DB_AND_REDIS" => "1" }
+
+# Plugin JS usually comes from a prebuilt bundle. When there's no bundle, e.g.
+# in a theme's CI running against a custom core ref, we build it here instead.
+build_plugin_env["LOAD_PLUGINS"] = ENV.fetch("LOAD_PLUGINS", "1")
+
+system(build_plugin_env, "bin/rake", "assets:precompile:build_plugins", exception: true)
+
+if ARGV.include?("--compress")
+  files = [
+    *Dir.glob("#{EMBER_APP_DIR}/dist/**/*.{js,wasm}"),
+    *Dir.glob("app/assets/generated/**/*.{js,wasm}"),
+  ]
+  Parallel.map(files, in_threads: 4) do |file|
+    next if File.exist?("#{file}.br")
+
+    start = Time.now
+    system("brotli", "-f", "--quality=11", "-o", "#{file}.br.tmp", file, exception: true)
+    File.rename("#{file}.br.tmp", "#{file}.br")
+    puts "Compressed #{file} in #{(Time.now - start).round(2)}s"
+  end
+end

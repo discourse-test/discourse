@@ -1,0 +1,196 @@
+/* eslint-disable ember/no-tracked-properties-from-args */
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { Input } from "@ember/component";
+import { on } from "@ember/modifier";
+import { action, computed } from "@ember/object";
+import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
+import { isEmpty } from "@ember/utils";
+import { popupAjaxError } from "discourse/lib/ajax-error";
+import discourseDebounce from "discourse/lib/debounce";
+import DiscourseURL, { userPath } from "discourse/lib/url";
+import User from "discourse/models/user";
+import DButton from "discourse/ui-kit/d-button";
+import DModalCancel from "discourse/ui-kit/d-modal-cancel";
+import { i18n } from "discourse-i18n";
+
+export default class UsernamePreference extends Component {
+  @service siteSettings;
+  @service dialog;
+
+  @tracked editing = false;
+  @tracked newUsername = this.args.user.username;
+
+  /** @type {string | null} */
+  @tracked errorMessage = null;
+  @tracked saving = false;
+  @tracked taken = false;
+
+  @computed("siteSettings.max_username_length")
+  get maxLength() {
+    return this.siteSettings.max_username_length;
+  }
+
+  @computed("siteSettings.min_username_length")
+  get minLength() {
+    return this.siteSettings.min_username_length;
+  }
+
+  @computed("newUsername")
+  get newUsernameEmpty() {
+    return isEmpty(this.newUsername);
+  }
+
+  @computed("saving", "newUsernameEmpty", "taken", "unchanged", "errorMessage")
+  get saveDisabled() {
+    return (
+      this.saving ||
+      this.newUsernameEmpty ||
+      this.taken ||
+      this.unchanged ||
+      this.errorMessage
+    );
+  }
+
+  get unchanged() {
+    return this.newUsername === this.args.user.username;
+  }
+
+  get saveButtonText() {
+    return this.saving ? i18n("saving") : i18n("user.change");
+  }
+
+  @action
+  toggleEditing() {
+    this.editing = !this.editing;
+
+    this.newUsername = this.args.user.username;
+    this.errorMessage = null;
+    this.saving = false;
+    this.taken = false;
+  }
+
+  @action
+  onInput(event) {
+    this.newUsername = event.target.value;
+    this.taken = false;
+    this.errorMessage = null;
+
+    if (isEmpty(this.newUsername)) {
+      return;
+    }
+
+    if (this.newUsername === this.args.user.username) {
+      return;
+    }
+
+    if (this.newUsername.length < this.minLength) {
+      this.errorMessage = i18n("user.name.too_short");
+      return;
+    }
+
+    discourseDebounce(this, this.#checkUsernameAvailability, 500);
+  }
+
+  @action
+  changeUsername() {
+    return this.dialog.yesNoConfirm({
+      title: i18n("user.change_username.confirm"),
+      didConfirm: async () => {
+        this.saving = true;
+
+        try {
+          await this.args.user.changeUsername(this.newUsername);
+          DiscourseURL.redirectTo(
+            userPath(this.newUsername.toLowerCase() + "/preferences")
+          );
+        } catch (e) {
+          popupAjaxError(e);
+        } finally {
+          this.saving = false;
+        }
+      },
+    });
+  }
+
+  async #checkUsernameAvailability() {
+    const username = this.newUsername;
+    const result = await User.checkUsername(
+      username,
+      undefined,
+      this.args.user.id
+    );
+
+    if (username !== this.newUsername) {
+      return;
+    }
+
+    if (result.errors) {
+      this.errorMessage = result.errors.join(" ");
+    } else if (result.available === false) {
+      this.taken = true;
+    }
+  }
+
+  <template>
+    {{#if this.editing}}
+      <form class="form-horizontal">
+        <div class="control-group">
+          <Input
+            class="input-xxlarge username-preference__input"
+            maxlength={{this.maxLength}}
+            @value={{this.newUsername}}
+            {{on "input" this.onInput}}
+          />
+
+          <div class="instructions">
+            <p>
+              {{#if this.taken}}
+                {{i18n "user.change_username.taken"}}
+              {{/if}}
+              <span>{{this.errorMessage}}</span>
+            </p>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <DButton
+            class="btn-primary username-preference__submit"
+            type="submit"
+            @action={{this.changeUsername}}
+            @disabled={{this.saveDisabled}}
+            @translatedLabel={{this.saveButtonText}}
+          />
+
+          <DModalCancel @close={{this.toggleEditing}} />
+
+          {{#if this.saved}}{{i18n "saved"}}{{/if}}
+        </div>
+      </form>
+    {{else}}
+      <div class="controls">
+        <span
+          class="static username-preference__current-username"
+        >{{@user.username}}</span>
+
+        {{#if @user.can_edit_username}}
+          <DButton
+            class="btn-default btn-small username-preference__edit-username"
+            @action={{this.toggleEditing}}
+            @icon="pencil"
+            @title="user.username.edit"
+          />
+        {{/if}}
+      </div>
+
+      {{#if this.siteSettings.enable_mentions}}
+        <div class="instructions">
+          {{trustHTML
+            (i18n "user.username.short_instructions" username=@user.username)
+          }}
+        </div>
+      {{/if}}
+    {{/if}}
+  </template>
+}

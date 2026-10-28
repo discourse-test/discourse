@@ -1,0 +1,380 @@
+import { cancel } from "@ember/runloop";
+import { Promise } from "rsvp";
+import { ajax } from "discourse/lib/ajax";
+import {
+  isRateLimitError,
+  rateLimitWaitSeconds,
+} from "discourse/lib/ajax-error";
+import { camelCaseToSnakeCase } from "discourse/lib/case-converter";
+import discourseDebounce from "discourse/lib/debounce";
+import { isTesting } from "discourse/lib/environment";
+import discourseLater from "discourse/lib/later";
+import { cloneJSON } from "discourse/lib/object";
+import { userPath } from "discourse/lib/url";
+import { emailValid } from "discourse/lib/utilities";
+import { CANCELLED_STATUS } from "discourse/ui-kit/modifiers/d-autocomplete";
+import { i18n } from "discourse-i18n";
+
+let cache = {},
+  cacheKey,
+  cacheTime,
+  currentTerm,
+  oldSearch,
+  rateLimitedUntil = 0;
+
+export function resetUserSearchCache() {
+  cache = {};
+  cacheKey = null;
+  cacheTime = null;
+  currentTerm = null;
+  oldSearch = null;
+  rateLimitedUntil = 0;
+}
+
+function performSearch(url, term, params, resultsFn) {
+  let cached = cache[term];
+  if (cached) {
+    resultsFn(cloneJSON(cached));
+    return;
+  }
+
+  if (rateLimitedUntil > Date.now()) {
+    resultsFn(CANCELLED_STATUS);
+    return;
+  }
+
+  const eagerComplete = eagerCompleteSearch(
+    term,
+    params.topic_id || params.category_id
+  );
+
+  if (term === "" && !eagerComplete && !params.last_seen_users) {
+    // The server returns no results in this case, so no point checking
+    // do not return empty list, because autocomplete will get terminated
+    resultsFn(CANCELLED_STATUS);
+    return;
+  }
+
+  // need to be able to cancel this
+  oldSearch = ajax(url, { data: { term, ...params } });
+
+  let returnVal = CANCELLED_STATUS;
+
+  oldSearch
+    .then(function (r) {
+      const hasResults = !!(
+        (r.users && r.users.length) ||
+        (r.groups && r.groups.length) ||
+        (r.emails && r.emails.length)
+      );
+
+      if (eagerComplete && !hasResults) {
+        // we are trying to eager load, but received no results
+        // do not return empty list, because autocomplete will get terminated
+        r = CANCELLED_STATUS;
+      }
+
+      cache[term] = r;
+      cacheTime = new Date();
+      // If there is a newer search term, return null
+      if (term === currentTerm) {
+        returnVal = r;
+      }
+    })
+    .catch(function (error) {
+      if (isRateLimitError(error)) {
+        rateLimitedUntil = Date.now() + rateLimitWaitSeconds(error) * 1000;
+      }
+    })
+    .finally(function () {
+      oldSearch = null;
+      resultsFn(cloneJSON(returnVal));
+    });
+}
+
+function debouncedSearch(url, term, params, resultsFn) {
+  discourseDebounce(this, performSearch, url, term, params, resultsFn, 300);
+}
+
+function lowerCaseIncludes(string, term) {
+  return string && term && string.toLowerCase().includes(term.toLowerCase());
+}
+
+function organizeResults(r, options) {
+  if (r === CANCELLED_STATUS) {
+    return r;
+  }
+
+  const exclude = options.exclude || [];
+
+  // Sometimes the term passed contains spaces, but the search is limited
+  // to the first word only.
+  const term = options.term?.trim()?.split(/\s/, 1)?.[0];
+
+  const users = [],
+    emails = [],
+    groups = [];
+
+  if (r.users) {
+    r.users.forEach((user) => {
+      if (!exclude.includes(user.username)) {
+        user.isUser = true;
+        user.isMetadataMatch =
+          term &&
+          !lowerCaseIncludes(user.username, term) &&
+          !lowerCaseIncludes(user.name, term);
+        users.push(user);
+      }
+    });
+  }
+
+  if (options.allowEmails && emailValid(options.term)) {
+    emails.push({ username: options.term, isEmail: true });
+  }
+
+  if (r.groups) {
+    r.groups.forEach((group) => {
+      if (!exclude.includes(group.name)) {
+        group.isGroup = true;
+        groups.push(group);
+      }
+    });
+  }
+
+  // Build prioritized list
+  // These Sets are used to prevent duplicate entries in the autocomplete suggestions
+  const userUsernameSet = new Set();
+  const groupNameSet = new Set();
+
+  // 1. Exact username matches
+  const exactUserUsernameMatches = users.filter((u) => {
+    if (u.username.toLowerCase() !== term?.toLowerCase()) {
+      return false;
+    }
+    userUsernameSet.add(u.username);
+    return true;
+  });
+
+  // 2. Exact group name matches
+  const exactGroupNameMatches = groups.filter((g) => {
+    if (g.name.toLowerCase() !== term?.toLowerCase()) {
+      return false;
+    }
+    groupNameSet.add(g.name);
+    return true;
+  });
+
+  // 3. Partial username matches (not already in exact matches)
+  const partialUserUsernameMatches = users.filter((u) => {
+    if (
+      userUsernameSet.has(u.username) ||
+      u.isMetadataMatch ||
+      (term && !lowerCaseIncludes(u.username, term))
+    ) {
+      return false;
+    }
+    userUsernameSet.add(u.username);
+    return true;
+  });
+
+  // 4. Partial group name matches (not already in exact matches)
+  const partialGroupNameMatches = groups.filter((g) => {
+    if (
+      groupNameSet.has(g.name) ||
+      (term && !lowerCaseIncludes(g.name, term))
+    ) {
+      return false;
+    }
+
+    groupNameSet.add(g.name);
+    return true;
+  });
+
+  // 5. Exact name matches (not already included via username)
+  const exactUserNameMatches = users.filter((u) => {
+    if (
+      userUsernameSet.has(u.username) ||
+      u.name?.toLowerCase() !== term?.toLowerCase() ||
+      u.isMetadataMatch
+    ) {
+      return false;
+    }
+    userUsernameSet.add(u.username);
+    return true;
+  });
+
+  // 6. Partial name matches (not already included)
+  const partialUserNameMatches = users.filter((u) => {
+    if (
+      userUsernameSet.has(u.username) ||
+      !lowerCaseIncludes(u.name, term) ||
+      u.isMetadataMatch
+    ) {
+      return false;
+    }
+
+    userUsernameSet.add(u.username);
+    return true;
+  });
+
+  // 7. Exact group full_name matches
+  const exactGroupFullNameMatches = groups.filter((g) => {
+    if (
+      groupNameSet.has(g.name) ||
+      !g.full_name ||
+      g.full_name?.toLowerCase() !== term?.toLowerCase()
+    ) {
+      return false;
+    }
+    groupNameSet.add(g.name);
+    return true;
+  });
+
+  // 8. Partial group full_name matches (not already in exact matches)
+  const partialGroupFullNameMatches = groups.filter((g) => {
+    if (
+      groupNameSet.has(g.name) ||
+      !g.full_name ||
+      !lowerCaseIncludes(g.full_name, term)
+    ) {
+      return false;
+    }
+
+    groupNameSet.add(g.name);
+    return true;
+  });
+
+  // 9. Users with metadata match
+  const metadataUserMatches = users.filter((u) => u.isMetadataMatch);
+
+  // Build the prioritized results in the new order
+  const prioritizedResults = [
+    ...exactUserUsernameMatches,
+    ...exactGroupNameMatches,
+    ...emails,
+    ...partialUserUsernameMatches,
+    ...partialGroupNameMatches,
+    ...exactUserNameMatches,
+    ...partialUserNameMatches,
+    ...exactGroupFullNameMatches,
+    ...partialGroupFullNameMatches,
+    ...metadataUserMatches,
+  ];
+
+  // Truncate to limit
+  const results = prioritizedResults.slice(0, options.limit);
+
+  // Only include users, emails, and groups that are actually in the results
+  results.users = results.filter((item) => item.isUser);
+  results.emails = results.filter((item) => item.isEmail);
+  results.groups = results.filter((item) => item.isGroup);
+  return results;
+}
+
+// all punctuation except for -, _ and . which are allowed in usernames
+// note: these are valid in names, but will end up tripping search anyway so just skip
+// this means searching for `sam saffron` is OK but if my name is `sam$ saffron` autocomplete
+// will not find me, which is a reasonable compromise
+//
+// we also ignore if we notice a double space or a string that is only a space
+const ignoreRegex =
+  /([\u2000-\u206F\u2E00-\u2E7F\\'!"#$%&()*,\/:;<=>?\[\]^`{|}~])|\s\s|^\s$|^[^+]*\+[^@]*$/;
+
+export function skipSearch(term, allowEmails, lastSeenUsers = false) {
+  if (lastSeenUsers) {
+    return false;
+  }
+  if (term.includes("@") && !allowEmails) {
+    return true;
+  }
+
+  return !!term.match(ignoreRegex);
+}
+
+export function eagerCompleteSearch(term, scopedId) {
+  return term === "" && !!scopedId;
+}
+
+export default function userSearch(options) {
+  if (options.term && options.term.length > 0 && options.term[0] === "@") {
+    options.term = options.term.substring(1);
+  }
+
+  const term = options.term || "";
+  const limit = options.limit || 6;
+  const url = options.url || userPath("search/users");
+  const params = {
+    search_context: options.searchContext,
+    topic_id: options.topicId,
+    category_id: options.categoryId,
+    include_groups: options.includeGroups,
+    include_mentionable_groups: options.includeMentionableGroups,
+    include_messageable_groups: options.includeMessageableGroups,
+    groups: options.groupMembersOf,
+    topic_allowed_users: options.allowedUsers,
+    include_staged_users: options.includeStagedUsers,
+    last_seen_users: options.lastSeenUsers,
+    prioritized_user_id: options.prioritizedUserId,
+    limit,
+  };
+
+  Object.entries(options.customUserSearchOptions || {}).forEach(
+    ([key, value]) => (params[camelCaseToSnakeCase(key)] = value)
+  );
+
+  if (oldSearch) {
+    oldSearch.abort();
+    oldSearch = null;
+  }
+
+  currentTerm = term;
+
+  return new Promise(function (resolve) {
+    const newCacheKey = JSON.stringify([url, params]);
+
+    if (new Date() - cacheTime > 30000 || cacheKey !== newCacheKey) {
+      cache = {};
+    }
+
+    cacheKey = newCacheKey;
+
+    let clearPromise;
+    if (!isTesting()) {
+      clearPromise = discourseLater(() => resolve(CANCELLED_STATUS), 5000);
+    }
+
+    if (skipSearch(term, options.allowEmails, options.lastSeenUsers)) {
+      resolve([]);
+      return;
+    }
+
+    debouncedSearch(url, term, params, function (r) {
+      cancel(clearPromise);
+      resolve(organizeResults(r, { ...options, limit }));
+    });
+  });
+}
+
+export function validateSearchResult(obj) {
+  const expectedPropertiesMap = {
+    isUser: {
+      nameProperty: "username",
+      translateKey: "composer.autocomplete.username_missing",
+    },
+    isEmail: {
+      nameProperty: "username",
+      translateKey: "composer.autocomplete.username_missing",
+    },
+    isGroup: {
+      nameProperty: "name",
+      translateKey: "composer.autocomplete.name_missing",
+    },
+  };
+
+  for (const [isEntity, props] of Object.entries(expectedPropertiesMap)) {
+    if (obj[isEntity] && !obj[props.nameProperty]) {
+      throw new Error(i18n(props.translateKey));
+    }
+  }
+  return true;
+}

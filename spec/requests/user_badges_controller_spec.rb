@@ -1,0 +1,983 @@
+# frozen_string_literal: true
+
+RSpec.describe UserBadgesController do
+  fab!(:user)
+  fab!(:admin)
+  fab!(:badge)
+
+  before { user.user_stat.update!(post_count: 1) }
+
+  describe "#index" do
+    fab!(:badge) { Fabricate(:badge, target_posts: true, show_posts: false) }
+    fab!(:gold_badge) do
+      Fabricate(:badge).tap { |badge| badge.update!(badge_type_id: BadgeType::Gold) }
+    end
+    fab!(:silver_badge) do
+      Fabricate(:badge).tap { |badge| badge.update!(badge_type_id: BadgeType::Silver) }
+    end
+    fab!(:bronze_badge) do
+      Fabricate(:badge).tap { |badge| badge.update!(badge_type_id: BadgeType::Bronze) }
+    end
+    fab!(:gold_grant) do
+      Fabricate(:user_badge, badge: gold_badge, user: user, granted_at: 1.hour.ago)
+    end
+    fab!(:silver_grant) do
+      Fabricate(:user_badge, badge: silver_badge, user: user, granted_at: 2.hours.ago)
+    end
+    fab!(:bronze_grant) { Fabricate(:user_badge, badge: bronze_badge, granted_at: 3.hours.ago) }
+
+    it "does not leak private info" do
+      p = create_post
+      UserBadge.create!(
+        badge: badge,
+        user: user,
+        post_id: p.id,
+        granted_by_id: -1,
+        granted_at: Time.now,
+      )
+
+      get "/user_badges.json", params: { badge_id: badge.id }
+      expect(response.status).to eq(200)
+
+      parsed = response.parsed_body
+      expect(parsed["topics"]).to eq(nil)
+      expect(parsed["badges"].length).to eq(1)
+      expect(parsed["user_badge_info"]["user_badges"][0]["post_id"]).to eq(nil)
+    end
+
+    it "fails when badges are disabled" do
+      SiteSetting.enable_badges = false
+      get "/user_badges.json", params: { badge_id: badge.id }
+      expect(response.status).to eq(404)
+    end
+
+    it "only accepts valid offset params" do
+      get "/user_badges.json", params: { badge_id: badge.id, offset: -1 }
+      expect(response.status).to eq(400)
+
+      get "/user_badges.json", params: { badge_id: badge.id, offset: 100 }
+      expect(response.status).to eq(200)
+    end
+
+    it "returns a recent grants feed when no badge id is specified" do
+      get "/user_badges.json"
+
+      expect(response.status).to eq(200)
+      ids = response.parsed_body["user_badge_info"]["user_badges"].map { |ub| ub["id"] }
+      expect(ids).to eq([gold_grant.id, silver_grant.id, bronze_grant.id])
+    end
+
+    it "excludes disabled badges from the recent grants feed" do
+      disabled_badge = Fabricate(:badge, enabled: false)
+      Fabricate(:user_badge, badge: disabled_badge, granted_at: 30.minutes.ago)
+
+      get "/user_badges.json"
+
+      expect(response.status).to eq(200)
+      ids = response.parsed_body["user_badge_info"]["user_badges"].map { |ub| ub["id"] }
+      expect(ids).to eq([gold_grant.id, silver_grant.id, bronze_grant.id])
+    end
+
+    it "combines grants across multiple badge_ids in a single request" do
+      get "/user_badges.json", params: { badge_ids: "#{gold_badge.id},#{silver_badge.id}" }
+
+      expect(response.status).to eq(200)
+      ids = response.parsed_body["user_badge_info"]["user_badges"].map { |ub| ub["id"] }
+      expect(ids).to contain_exactly(gold_grant.id, silver_grant.id)
+      expect(ids).not_to include(bronze_grant.id)
+    end
+
+    it "accepts pipe-separated badge_ids" do
+      get "/user_badges.json", params: { badge_ids: "#{gold_badge.id}|#{silver_badge.id}" }
+
+      expect(response.status).to eq(200)
+      ids = response.parsed_body["user_badge_info"]["user_badges"].map { |ub| ub["id"] }
+      expect(ids).to contain_exactly(gold_grant.id, silver_grant.id)
+    end
+
+    it "filters the recent grants feed by badge_type_id" do
+      get "/user_badges.json", params: { badge_type_id: BadgeType::Gold }
+
+      expect(response.status).to eq(200)
+      ids = response.parsed_body["user_badge_info"]["user_badges"].map { |ub| ub["id"] }
+      expect(ids).to contain_exactly(gold_grant.id)
+      expect(ids).not_to include(silver_grant.id, bronze_grant.id)
+    end
+
+    it "limits the recent grants feed" do
+      get "/user_badges.json", params: { limit: 1 }
+
+      expect(response.status).to eq(200)
+      ids = response.parsed_body["user_badge_info"]["user_badges"].map { |ub| ub["id"] }
+      expect(ids).to eq([gold_grant.id])
+    end
+
+    it "applies the feed limit to a single badge_id" do
+      newest_grant = Fabricate(:user_badge, badge: gold_badge, granted_at: 30.minutes.ago)
+
+      get "/user_badges.json", params: { badge_id: gold_badge.id, limit: 1 }
+
+      expect(response.status).to eq(200)
+      user_badges = response.parsed_body["user_badge_info"]["user_badges"]
+      expect(user_badges.map { |ub| ub["id"] }).to eq([newest_grant.id])
+    end
+
+    it "returns not found for a single badge_id that is unknown or disabled" do
+      get "/user_badges.json", params: { badge_id: 999_999 }
+      expect(response.status).to eq(404)
+
+      disabled_badge = Fabricate(:badge, enabled: false)
+      get "/user_badges.json", params: { badge_id: disabled_badge.id }
+      expect(response.status).to eq(404)
+    end
+
+    it "selects a single badge by badge_name with the same feed behaviour" do
+      get "/user_badges.json", params: { badge_name: gold_badge.name, limit: 10 }
+
+      expect(response.status).to eq(200)
+      user_badges = response.parsed_body["user_badge_info"]["user_badges"]
+      expect(user_badges.map { |ub| ub["id"] }).to eq([gold_grant.id])
+    end
+
+    it "treats an empty badge_ids param as the full recent grants feed" do
+      get "/user_badges.json", params: { badge_ids: "" }
+
+      expect(response.status).to eq(200)
+      ids = response.parsed_body["user_badge_info"]["user_badges"].map { |ub| ub["id"] }
+      expect(ids).to eq([gold_grant.id, silver_grant.id, bronze_grant.id])
+    end
+
+    it "excludes non-listable badges from the unfiltered recent grants feed" do
+      hidden_badge = Fabricate(:badge, listable: false)
+      Fabricate(:user_badge, badge: hidden_badge, granted_at: 30.minutes.ago)
+
+      get "/user_badges.json"
+
+      expect(response.status).to eq(200)
+      ids = response.parsed_body["user_badge_info"]["user_badges"].map { |ub| ub["id"] }
+      expect(ids).to eq([gold_grant.id, silver_grant.id, bronze_grant.id])
+    end
+
+    it "still returns grants for an explicitly requested non-listable badge" do
+      hidden_badge = Fabricate(:badge, listable: false)
+      hidden_grant = Fabricate(:user_badge, badge: hidden_badge, granted_at: 1.hour.ago)
+
+      get "/user_badges.json", params: { badge_id: hidden_badge.id }
+
+      expect(response.status).to eq(200)
+      ids = response.parsed_body["user_badge_info"]["user_badges"].map { |ub| ub["id"] }
+      expect(ids).to eq([hidden_grant.id])
+    end
+
+    it "returns no grants for a non-empty badge_ids that yields no valid ids" do
+      get "/user_badges.json", params: { badge_ids: "invalid" }
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["user_badge_info"]["user_badges"]).to eq([])
+    end
+
+    it "keeps valid ids and drops junk from badge_ids" do
+      get "/user_badges.json", params: { badge_ids: "#{gold_badge.id},invalid" }
+
+      expect(response.status).to eq(200)
+      ids = response.parsed_body["user_badge_info"]["user_badges"].map { |ub| ub["id"] }
+      expect(ids).to eq([gold_grant.id])
+    end
+
+    it "accepts array-style badge_ids" do
+      get "/user_badges.json", params: { badge_ids: [gold_badge.id.to_s, silver_badge.id.to_s] }
+
+      expect(response.status).to eq(200)
+      ids = response.parsed_body["user_badge_info"]["user_badges"].map { |ub| ub["id"] }
+      expect(ids).to contain_exactly(gold_grant.id, silver_grant.id)
+    end
+
+    it "returns 400 for an array-form limit" do
+      get "/user_badges.json", params: { limit: [1] }
+
+      expect(response.status).to eq(400)
+    end
+
+    it "keeps the no-limit default above the explicit limit cap" do
+      51.times { Fabricate(:user_badge, badge: badge) }
+
+      get "/user_badges.json", params: { badge_id: badge.id }
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["user_badge_info"]["user_badges"].length).to eq(51)
+    end
+
+    it "returns 400 for a blank badge_id rather than falling back to the feed" do
+      get "/user_badges.json", params: { badge_id: "" }
+
+      expect(response.status).to eq(400)
+    end
+
+    it "returns 400 when badge_ids exceeds the maximum" do
+      get "/user_badges.json", params: { badge_ids: (1..101).to_a.join(",") }
+
+      expect(response.status).to eq(400)
+    end
+
+    it "returns 400 for an array-form badge_type_id" do
+      get "/user_badges.json", params: { badge_type_id: [BadgeType::Gold] }
+
+      expect(response.status).to eq(400)
+    end
+
+    it "returns a user's recent grants and grant_count when no badge id is specified" do
+      get "/user_badges.json", params: { username: user.username }
+
+      expect(response.status).to eq(200)
+      parsed = response.parsed_body["user_badge_info"]
+      expect(parsed["grant_count"]).to eq(2)
+      expect(parsed["user_badges"].map { |ub| ub["id"] }).to contain_exactly(
+        gold_grant.id,
+        silver_grant.id,
+      )
+    end
+
+    it "does not disclose badges when public profiles are hidden" do
+      SiteSetting.hide_user_profiles_from_public = true
+
+      get "/user_badges.json", params: { badge_id: badge.id, username: user.username }
+
+      expect(response).to have_http_status(:not_found)
+      expect(response.body).not_to include(user.username)
+    end
+
+    it "returns not found for hidden new user profiles" do
+      hidden_user = Fabricate(:trust_level_0)
+      hidden_user.user_stat.update!(post_count: 1)
+      Fabricate(:user_badge, user: hidden_user, badge: badge)
+
+      get "/user_badges.json", params: { badge_id: badge.id, username: hidden_user.username }
+
+      expect(response.status).to eq(404)
+      expect(response.body).not_to include(hidden_user.username)
+    end
+
+    it "returns badges for visible inactive profiles" do
+      inactive_user = Fabricate(:user, active: false)
+      inactive_user.user_stat.update!(post_count: 1)
+      Fabricate(:user_badge, user: inactive_user, badge: badge)
+
+      get "/user_badges.json", params: { badge_id: badge.id, username: inactive_user.username }
+
+      expect(response.status).to eq(200)
+
+      parsed_body = response.parsed_body
+      aggregate_failures do
+        expect(parsed_body["user_badge_info"]["grant_count"]).to eq(1)
+        expect(parsed_body["user_badge_info"]["username"]).to eq(inactive_user.username)
+        expect(parsed_body["user_badge_info"]["user_badges"].first["user_id"]).to eq(
+          inactive_user.id,
+        )
+      end
+    end
+  end
+
+  describe "#show" do
+    fab!(:post)
+    fab!(:private_message_post)
+    let(:topic) { post.topic }
+    let(:private_message_topic) { private_message_post.topic }
+
+    fab!(:group)
+    fab!(:private_category) { Fabricate(:private_category, group: group) }
+    fab!(:restricted_topic) { Fabricate(:topic, category: private_category) }
+    fab!(:restricted_post) { Fabricate(:post, topic: restricted_topic) }
+    fab!(:badge) { Fabricate(:badge, show_posts: true) }
+    fab!(:user_badge) { Fabricate(:user_badge, user: user, badge: badge, post: post) }
+    fab!(:user_badge_2) { Fabricate(:user_badge, badge: badge, post: private_message_post) }
+    fab!(:user_badge_3) { Fabricate(:user_badge, badge: badge, post: restricted_post) }
+
+    it "returns user_badges for a user" do
+      get "/user-badges/#{user.username}.json"
+
+      expect(response.status).to eq(200)
+      parsed = response.parsed_body
+      expect(parsed["user_badges"].length).to eq(1)
+    end
+
+    it "does not disclose a user's badges when public profiles are hidden" do
+      SiteSetting.hide_user_profiles_from_public = true
+
+      get "/user-badges/#{user.username}.json"
+
+      expect(response).to have_http_status(:not_found)
+      expect(response.body).not_to include(user_badge.badge.name)
+    end
+
+    it "returns user_badges for a user with period in username" do
+      user.update!(username: "myname.test")
+      get "/user-badges/#{user.username}", xhr: true
+
+      expect(response.status).to eq(200)
+      parsed = response.parsed_body
+      expect(parsed["user_badges"].length).to eq(1)
+    end
+
+    it "returns user_badges for a badge" do
+      get "/user_badges.json", params: { badge_id: badge.id }
+
+      expect(response.status).to eq(200)
+      parsed = response.parsed_body
+      expect(parsed["user_badge_info"]["user_badges"].length).to eq(3)
+    end
+
+    it "includes counts when passed the aggregate argument" do
+      get "/user-badges/#{user.username}.json", params: { grouped: true }
+
+      expect(response.status).to eq(200)
+      parsed = response.parsed_body
+      expect(parsed["user_badges"].first.has_key?("count")).to eq(true)
+    end
+
+    context "for post and topic attributes associated with user badge" do
+      it "does not include the attributes for the private topic when user is anon" do
+        get "/user_badges.json", params: { badge_id: badge.id }
+
+        expect(response.status).to eq(200)
+
+        parsed = response.parsed_body
+
+        expect(parsed["topics"].map { |t| t["id"] }).to contain_exactly(post.topic_id)
+
+        parsed_user_badges = parsed["user_badge_info"]["user_badges"]
+
+        expect(parsed_user_badges.map { |ub| ub["post_id"] }.compact).to contain_exactly(post.id)
+        expect(parsed_user_badges.map { |ub| ub["post_number"] }.compact).to contain_exactly(
+          post.post_number,
+        )
+      end
+
+      it "does not include the attributes for topics which the current user cannot see" do
+        sign_in(user)
+
+        get "/user_badges.json", params: { badge_id: badge.id }
+
+        expect(response.status).to eq(200)
+
+        parsed = response.parsed_body
+
+        expect(parsed["topics"].map { |t| t["id"] }).to contain_exactly(post.topic_id)
+
+        parsed_user_badges = parsed["user_badge_info"]["user_badges"]
+
+        expect(parsed_user_badges.map { |ub| ub["post_id"] }.compact).to contain_exactly(post.id)
+        expect(parsed_user_badges.map { |ub| ub["post_number"] }.compact).to contain_exactly(
+          post.post_number,
+        )
+      end
+
+      it "includes the attributes for regular topic, private messages and restricted topics which the current user can see" do
+        group.add(user)
+        private_message_topic.allowed_users << user
+
+        sign_in(user)
+
+        get "/user_badges.json", params: { badge_id: badge.id }
+
+        expect(response.status).to eq(200)
+
+        parsed = response.parsed_body
+
+        expect(parsed["topics"].map { |t| t["id"] }).to contain_exactly(
+          post.topic_id,
+          private_message_post.topic_id,
+          restricted_post.topic_id,
+        )
+
+        parsed_user_badges = parsed["user_badge_info"]["user_badges"]
+
+        expect(parsed_user_badges.map { |ub| ub["post_id"] }.compact).to contain_exactly(
+          post.id,
+          private_message_post.id,
+          restricted_post.id,
+        )
+
+        expect(parsed_user_badges.map { |ub| ub["post_number"] }.compact).to contain_exactly(
+          post.post_number,
+          private_message_post.post_number,
+          restricted_post.post_number,
+        )
+      end
+    end
+
+    context "with hidden profiles" do
+      before { user.user_option.update_columns(hide_profile: true) }
+
+      it "returns 404 if `hide_profile` user option is checked" do
+        get "/user-badges/#{user.username}.json"
+        expect(response.status).to eq(404)
+      end
+
+      it "returns user_badges if `allow_users_to_hide_profile` is false" do
+        SiteSetting.allow_users_to_hide_profile = false
+
+        get "/user-badges/#{user.username}.json"
+        expect(response.status).to eq(200)
+      end
+    end
+  end
+
+  describe "#create" do
+    it "requires username to be specified" do
+      sign_in(admin)
+      post "/user_badges.json", params: { badge_id: badge.id }
+      expect(response.status).to eq(400)
+    end
+
+    it "does not allow regular users to grant badges" do
+      sign_in(Fabricate(:user))
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             suppress_notification: true,
+           }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "grants badges from staff" do
+      post_1 = create_post
+
+      sign_in(admin)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             reason: Discourse.base_url + post_1.url,
+           }
+
+      expect(response.status).to eq(200)
+
+      user_badge = UserBadge.find_by(user: user, badge: badge)
+
+      expect(user_badge).to be_present
+      expect(user_badge.granted_by).to eq(admin)
+      expect(user_badge.post_id).to eq(post_1.id)
+      expect(UserHistory.where(acting_user: admin, target_user: user).count).to eq(1)
+    end
+
+    it "grants a badge associated with a direct post ID from an authenticated API request" do
+      associated_post = Fabricate(:post, user: Fabricate(:user))
+      api_key = Fabricate(:api_key)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             post_id: associated_post.id,
+           },
+           headers: {
+             HTTP_API_KEY: api_key.key,
+             HTTP_API_USERNAME: "system",
+           }
+
+      expect(response).to have_http_status(:ok)
+      expect(UserBadge.find_by!(user:, badge:).post_id).to eq(associated_post.id)
+    end
+
+    it "silently grants a multiple-grant badge once for a distinct direct post ID" do
+      badge.update!(multiple_grant: true)
+      first_post = Fabricate(:post, user: user)
+      second_post = Fabricate(:post, user: user)
+      api_key = Fabricate(:api_key)
+      headers = { HTTP_API_KEY: api_key.key, HTTP_API_USERNAME: "system" }
+      granted_badge_notifications =
+        user.notifications.where(notification_type: Notification.types[:granted_badge])
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             post_id: first_post.id,
+           },
+           headers: headers
+      expect(response.status).to eq(200)
+      expect(granted_badge_notifications.count).to eq(1)
+
+      %w[true false].each do |suppress_notification|
+        post "/user_badges.json",
+             params: {
+               badge_id: badge.id,
+               username: user.username,
+               post_id: second_post.id,
+               suppress_notification: suppress_notification,
+             },
+             headers: headers
+        expect(response.status).to eq(200)
+      end
+
+      expect(UserBadge.where(user:, badge:).pluck(:post_id)).to contain_exactly(
+        first_post.id,
+        second_post.id,
+      )
+      expect(granted_badge_notifications.count).to eq(1)
+      expect(
+        UserBadge.find_by!(user:, badge:, post_id: first_post.id).notification_id,
+      ).to be_present
+      expect(UserBadge.find_by!(user:, badge:, post_id: second_post.id).notification_id).to be_nil
+    end
+
+    it "rejects malformed, missing, and deleted direct post IDs without granting a badge" do
+      existing_post = Fabricate(:post)
+      deleted_post = Fabricate(:post)
+      deleted_post.trash!(admin)
+      sign_in(admin)
+
+      [
+        nil,
+        [],
+        [existing_post.id],
+        {},
+        { id: existing_post.id },
+        0,
+        -1,
+        "1.5",
+        existing_post.id + 0.5,
+      ].each do |post_id|
+        post "/user_badges.json",
+             params: {
+               badge_id: badge.id,
+               username: user.username,
+               post_id: post_id,
+             },
+             as: :json
+
+        expect(response).to have_http_status(:bad_request)
+      end
+
+      [Post.maximum(:id) + 1, deleted_post.id].each do |post_id|
+        post "/user_badges.json",
+             params: {
+               badge_id: badge.id,
+               username: user.username,
+               post_id: post_id,
+             }
+
+        expect(response).to have_http_status(:not_found)
+      end
+
+      expect(UserBadge.exists?(user:, badge:)).to eq(false)
+    end
+
+    it "silently grants a multiple-grant badge associated through a reason URL" do
+      badge.update!(multiple_grant: true)
+      associated_post = Fabricate(:post, user: user)
+      sign_in(admin)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             reason: Discourse.base_url + associated_post.url,
+             suppress_notification: true,
+           }
+
+      expect(response).to have_http_status(:ok)
+      user_badge = UserBadge.find_by!(user:, badge:)
+      expect(user_badge.post_id).to eq(associated_post.id)
+      expect(user_badge.notification_id).to be_nil
+      expect(
+        user.notifications.where(notification_type: Notification.types[:granted_badge]),
+      ).to be_empty
+    end
+
+    it "rejects a direct post ID together with a nonblank reason" do
+      associated_post = Fabricate(:post)
+      sign_in(admin)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             post_id: associated_post.id,
+             reason: Discourse.base_url + associated_post.url,
+           }
+
+      expect(response).to have_http_status(:bad_request)
+      expect(UserBadge.exists?(user:, badge:)).to eq(false)
+    end
+
+    it "only allows a moderator to associate posts they can see" do
+      moderator = Fabricate(:moderator)
+      private_message_post = Fabricate(:private_message_post)
+      group = Fabricate(:group)
+      restricted_category = Fabricate(:private_category, group: group)
+      restricted_post = Fabricate(:post, topic: Fabricate(:topic, category: restricted_category))
+      accessible_post = Fabricate(:post)
+      sign_in(moderator)
+
+      [private_message_post, restricted_post].each do |inaccessible_post|
+        post "/user_badges.json",
+             params: {
+               badge_id: badge.id,
+               username: user.username,
+               post_id: inaccessible_post.id,
+             }
+
+        expect(response).to have_http_status(:forbidden)
+      end
+      expect(UserBadge.exists?(user:, badge:)).to eq(false)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             post_id: accessible_post.id,
+           }
+
+      expect(response).to have_http_status(:ok)
+      expect(UserBadge.find_by!(user:, badge:).post_id).to eq(accessible_post.id)
+    end
+
+    it "does not suppress notifications for the string false" do
+      sign_in(admin)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             suppress_notification: "false",
+           }
+
+      expect(response.status).to eq(200)
+      expect(
+        user.notifications.where(notification_type: Notification.types[:granted_badge]).count,
+      ).to eq(1)
+    end
+
+    it "suppresses notifications for JSON true" do
+      sign_in(admin)
+
+      post "/user_badges.json",
+           params: {
+             badge_name: badge.name,
+             username: user.username,
+             suppress_notification: true,
+           },
+           as: :json
+
+      expect(response.status).to eq(200)
+      expect(UserBadge.exists?(user:, badge:)).to eq(true)
+      expect(
+        user.notifications.where(notification_type: Notification.types[:granted_badge]),
+      ).to be_empty
+    end
+
+    it "does not grant badges from regular api calls" do
+      api_key = Fabricate(:api_key, user: user)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             api_key: api_key.key,
+           }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "grants badges from master api calls" do
+      api_key = Fabricate(:api_key)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+           },
+           headers: {
+             HTTP_API_KEY: api_key.key,
+             HTTP_API_USERNAME: "system",
+           }
+
+      expect(response.status).to eq(200)
+      user_badge = UserBadge.find_by(user: user, badge: badge)
+      expect(user_badge).to be_present
+      expect(user_badge.granted_by).to eq(Discourse.system_user)
+      expect(UserHistory.where(acting_user: Discourse.system_user, target_user: user).count).to eq(
+        0,
+      )
+    end
+
+    it "triggers user_badge_granted" do
+      sign_in(Fabricate(:admin))
+
+      events =
+        DiscourseEvent
+          .track_events do
+            post "/user_badges.json", params: { badge_id: badge.id, username: user.username }
+          end
+          .map { |event| event[:event_name] }
+
+      expect(events).to include(:user_badge_granted)
+    end
+
+    it "does not grant badge when external link is used in reason" do
+      post = create_post
+
+      sign_in(admin)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             reason: "http://example.com/" + post.url,
+           }
+
+      expect(response.status).to eq(400)
+    end
+
+    it "does not grant badge if invalid discourse post/topic link is used in reason" do
+      post = create_post
+
+      sign_in(admin)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             reason: Discourse.base_url + "/random_url/" + post.url,
+           }
+
+      expect(response.status).to eq(400)
+    end
+
+    it "grants badge when valid post/topic link is given in reason" do
+      post = create_post
+
+      sign_in(admin)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             reason: Discourse.base_url + post.url,
+           }
+
+      expect(response.status).to eq(200)
+    end
+
+    it "grants badge when a nested-view post link is given in reason" do
+      post = create_post
+      topic = post.topic
+      nested_url = "#{Discourse.base_url}/n/#{topic.slug}/#{topic.id}/#{post.post_number}"
+
+      sign_in(admin)
+
+      post "/user_badges.json",
+           params: {
+             badge_id: badge.id,
+             username: user.username,
+             reason: nested_url,
+           }
+
+      expect(response.status).to eq(200)
+      expect(UserBadge.exists?(badge_id: badge.id, post_id: post.id, granted_by: admin.id)).to eq(
+        true,
+      )
+    end
+
+    describe "with relative_url_root" do
+      it "grants badge when valid post/topic link is given in reason" do
+        set_subfolder "/discuss"
+
+        post = create_post
+
+        sign_in(admin)
+
+        post "/user_badges.json",
+             params: {
+               badge_id: badge.id,
+               username: user.username,
+               reason: "#{Discourse.base_url}#{post.url}",
+             }
+
+        expect(response.status).to eq(200)
+
+        expect(UserBadge.exists?(badge_id: badge.id, post_id: post.id, granted_by: admin.id)).to eq(
+          true,
+        )
+      end
+    end
+  end
+
+  describe "#destroy" do
+    let!(:user_badge) do
+      UserBadge.create(
+        badge: badge,
+        user: user,
+        granted_by: Discourse.system_user,
+        granted_at: Time.now,
+      )
+    end
+
+    it "checks that the user is authorized to revoke a badge" do
+      delete "/user_badges/#{user_badge.id}.json"
+      expect(response.status).to eq(403)
+    end
+
+    it "revokes the badge" do
+      sign_in(admin)
+      delete "/user_badges/#{user_badge.id}.json"
+
+      expect(response.status).to eq(200)
+      expect(UserBadge.find_by(id: user_badge.id)).to eq(nil)
+      expect(UserHistory.where(acting_user: admin, target_user: user).count).to eq(1)
+    end
+
+    it "triggers user_badge_removed" do
+      sign_in(Fabricate(:admin))
+
+      events =
+        DiscourseEvent
+          .track_events { delete "/user_badges/#{user_badge.id}.json" }
+          .map { |event| event[:event_name] }
+
+      expect(events).to include(:user_badge_removed)
+    end
+  end
+
+  describe "#favorite" do
+    let!(:user_badge) do
+      UserBadge.create(
+        badge: badge,
+        user: user,
+        granted_by: Discourse.system_user,
+        granted_at: Time.now,
+      )
+    end
+
+    it "requires the user to be logged in" do
+      put "/user_badges/#{user_badge.id}/toggle_favorite.json"
+      expect(response.status).to eq(403)
+      expect(response.parsed_body["errors"]).to include(I18n.t("not_logged_in"))
+    end
+
+    it "returns 403 for anonymous users even with nonexistent user_badge_id" do
+      put "/user_badges/#{user_badge.id + 999}/toggle_favorite.json"
+      expect(response.status).to eq(403)
+      expect(response.parsed_body["errors"]).to include(I18n.t("not_logged_in"))
+    end
+
+    it "checks that the user is authorized to favorite the badge" do
+      sign_in(Fabricate(:admin))
+      put "/user_badges/#{user_badge.id}/toggle_favorite.json"
+      expect(response.status).to eq(403)
+    end
+
+    it "checks that the user has less than max_favorites_badges favorited badges" do
+      sign_in(user)
+      UserBadge.create(
+        badge: Fabricate(:badge),
+        user: user,
+        granted_by: Discourse.system_user,
+        granted_at: Time.now,
+        is_favorite: true,
+      )
+      UserBadge.create(
+        badge: Fabricate(:badge),
+        user: user,
+        granted_by: Discourse.system_user,
+        granted_at: Time.now,
+        is_favorite: true,
+      )
+
+      put "/user_badges/#{user_badge.id}/toggle_favorite.json"
+      expect(response.status).to eq(400)
+
+      SiteSetting.max_favorite_badges = 3
+
+      put "/user_badges/#{user_badge.id}/toggle_favorite.json"
+      expect(response.status).to eq(204)
+    end
+
+    it "favorites a badge" do
+      sign_in(user)
+      put "/user_badges/#{user_badge.id}/toggle_favorite.json"
+
+      expect(response.status).to eq(204)
+      user_badge = UserBadge.find_by(user: user, badge: badge)
+      expect(user_badge.is_favorite).to eq(true)
+    end
+
+    it "unfavorites a badge" do
+      sign_in(user)
+      user_badge.toggle!(:is_favorite)
+      put "/user_badges/#{user_badge.id}/toggle_favorite.json"
+
+      expect(response.status).to eq(204)
+      user_badge = UserBadge.find_by(user: user, badge: badge)
+      expect(user_badge.is_favorite).to eq(false)
+    end
+
+    it "works with multiple grants" do
+      SiteSetting.max_favorite_badges = 2
+
+      sign_in(user)
+
+      badge = Fabricate(:badge, multiple_grant: true)
+      user_badge =
+        UserBadge.create(
+          badge: badge,
+          user: user,
+          granted_by: Discourse.system_user,
+          granted_at: Time.now,
+          seq: 0,
+          is_favorite: true,
+        )
+      user_badge2 =
+        UserBadge.create(
+          badge: badge,
+          user: user,
+          granted_by: Discourse.system_user,
+          granted_at: Time.now,
+          seq: 1,
+          is_favorite: true,
+        )
+      other_badge = Fabricate(:badge)
+      other_user_badge =
+        UserBadge.create(
+          badge: other_badge,
+          user: user,
+          granted_by: Discourse.system_user,
+          granted_at: Time.now,
+        )
+
+      put "/user_badges/#{user_badge.id}/toggle_favorite.json"
+      expect(response.status).to eq(204)
+      expect(user_badge.reload.is_favorite).to eq(false)
+      expect(user_badge2.reload.is_favorite).to eq(false)
+
+      put "/user_badges/#{user_badge.id}/toggle_favorite.json"
+      expect(response.status).to eq(204)
+      expect(user_badge.reload.is_favorite).to eq(true)
+      expect(user_badge2.reload.is_favorite).to eq(true)
+
+      put "/user_badges/#{other_user_badge.id}/toggle_favorite.json"
+      expect(response.status).to eq(204)
+      expect(other_user_badge.reload.is_favorite).to eq(true)
+
+      user_badge3 =
+        UserBadge.create(
+          badge: badge,
+          user: user,
+          granted_by: Discourse.system_user,
+          granted_at: Time.now,
+          seq: 2,
+        )
+
+      put "/user_badges/#{user_badge3.id}/toggle_favorite.json"
+      expect(response.status).to eq(204)
+      expect(user_badge.reload.is_favorite).to eq(false)
+      expect(user_badge2.reload.is_favorite).to eq(false)
+      expect(user_badge3.reload.is_favorite).to eq(false)
+    end
+  end
+end

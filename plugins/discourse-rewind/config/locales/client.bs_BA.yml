@@ -1,0 +1,24 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+bs_BA:
+  js:
+    discourse_rewind:
+      share:
+        toggle_label:
+          private: "Privatno"
+          public: "Javno"
+      reports:
+        chat_usage:
+          author: Vi
+          author_others: "%{username}"
+        live_usage:
+          minutes:
+            one: "%{count} min"
+            few: "%{count} min"
+            other: "%{count} minuta"
+        writing_analysis:
+          menu_other: Other

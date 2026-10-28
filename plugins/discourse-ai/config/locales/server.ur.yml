@@ -1,0 +1,133 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+ur:
+  discourse_automation:
+    scriptables:
+      llm_triage:
+        notify_author_pm:
+          body: |
+            آداب @%{username},
+
+            "%{topic_title}" میں آپ کے دھاگے کو عارضی طور پر ہٹا دیا گیا اور ایک نگران کے جائزہ کے لیے ہماری جائزہ کی قطار میں شامل کیا گیا ہے۔ اگر منظور ہوا تو یہ خود بخود بحال ہو جائے گا۔
+
+            حوالہ: %{post_url}
+  reports:
+    overall_sentiment:
+      yaxis: "تاریخ"
+    emotion_neutral:
+      title: "😐 نیوٹرل"
+  discourse_ai:
+    tools:
+      presets:
+        image_generation_custom:
+          name: "اپنی مرضی کا"
+    spam_detection:
+      bot_user_update_failed: "اسپام اسکیننگ بوٹ رکن کو اپ ڈیٹ کرنے میں ناکام"
+    ai_bot:
+      navigation:
+        settings:
+          title: "سائٹ کی ترتیبات"
+        users:
+          title: "اراکین"
+        groups:
+          title: "گروپس"
+        review:
+          title: "قطار کا جائزہ"
+        categories:
+          title: "زمرہ جات"
+        tags:
+          title: "ٹیگز"
+        themes:
+          title: "تِھیمز"
+        backups:
+          title: "بیک اَپس"
+      read_post:
+        unknown_post: "دھاگہ"
+      chat_tool_approval:
+        topic_states:
+          open: "کھولیں"
+          closed: "بند کیا"
+          active: "فعال"
+          deleted: "مٹائیں"
+        solution_post: "دھاگہ #%{number}"
+        duration_label: "دورانیہ:"
+        user_duration:
+          one: "%{count} دن"
+          other: "%{count} دن"
+        posts_label: "دھاگے"
+        category_label: "زُمرَہ"
+        category_fields:
+          name: "نام"
+          description: "تفصیل"
+          color: "رنگ"
+          text_color: "متن کا رنگ"
+        approve_label: "جی ہاں"
+        reject_label: "نہیں "
+      tool_options:
+        update_artifact:
+          editor_llm:
+            name: "ایل ایل ایم"
+          update_algorithm:
+            name: "الگورتھم کو اپ ڈیٹ کریں"
+            description: "ایل ایل ایم کو مکمل طور پر تبدیل کرنے کے لئے کہیں، یا اپ ڈیٹ کرنے کے لئے ڈِیف استعمال کریں"
+      tool_summary:
+        edit_tag: "ٹیگ ترمیم کریں"
+        create_category: "زمرہ بنائیں"
+        search: "تلاش کریں"
+        time: "وقت"
+        summarize: "خلاصہ"
+        read: "موضوع پڑھیں"
+      tool_help:
+        create_category: "نیا زمرہ بنائیں"
+      tool_description:
+        time: "%{timezone} میں وقت %{time} ہے"
+      close_topic:
+        errors:
+          not_found: "موضوع نہیں ملا."
+      unlist_topic:
+        errors:
+          not_found: "موضوع نہیں ملا."
+      delete_topic:
+        errors:
+          not_found: "موضوع نہیں ملا."
+      change_topic_tags:
+        errors:
+          not_found: "موضوع نہیں ملا."
+      edit_category:
+        errors:
+          not_found: "زُمرہ نہیں ملا."
+      change_topic_category:
+        errors:
+          not_found: "موضوع نہیں ملا."
+          category_not_found: "زُمرہ نہیں ملا."
+      set_topic_timer:
+        errors:
+          not_found: "موضوع نہیں ملا."
+      set_slow_mode:
+        errors:
+          not_found: "موضوع نہیں ملا."
+      move_posts:
+        errors:
+          not_found: "موضوع نہیں ملا."
+      assign:
+        errors:
+          not_found: "موضوع نہیں ملا."
+    reviewables:
+      ai_tool_action:
+        approve:
+          title: "منظور"
+        reject:
+          title: "مسترد کریں"
+    sentiment:
+      reports:
+        post_emotion:
+          neutral: "نیوٹرل 😐"
+        sentiment_analysis:
+          neutral: "نیوٹرل"
+    ai_staff_action_logger:
+      updated: "اپ ڈیٹ"
+      removed: "ہٹا دیا"

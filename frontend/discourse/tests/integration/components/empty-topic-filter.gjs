@@ -1,0 +1,60 @@
+/* eslint-disable discourse/test-filename-suffix */
+import { render } from "@ember/test-helpers";
+import { module, test } from "qunit";
+import EmptyTopicFilter from "discourse/components/empty-topic-filter";
+import { setupRenderingTest } from "discourse/tests/helpers/component-test";
+import { i18n } from "discourse-i18n";
+
+module("Integration | Component | EmptyTopicFilter", function (hooks) {
+  setupRenderingTest(hooks);
+
+  test("renders new education text when newFilter is true", async function (assert) {
+    await render(
+      <template>
+        <EmptyTopicFilter @newFilter={{true}} @unreadFilter={{false}} />
+      </template>
+    );
+
+    assert
+      .dom(".empty-topic-filter__text")
+      .hasText(i18n("topics.none.education.new"));
+  });
+
+  test("renders unified_new education text when newFilter is true and unified_new_enabled", async function (assert) {
+    this.currentUser.unified_new_enabled = true;
+
+    await render(
+      <template>
+        <EmptyTopicFilter @newFilter={{true}} @unreadFilter={{false}} />
+      </template>
+    );
+
+    assert
+      .dom(".empty-topic-filter__text")
+      .hasText(i18n("topics.none.education.unified_new"));
+  });
+
+  test("renders unread education text when unreadFilter is true", async function (assert) {
+    await render(
+      <template>
+        <EmptyTopicFilter @newFilter={{false}} @unreadFilter={{true}} />
+      </template>
+    );
+
+    assert
+      .dom(".empty-topic-filter__text")
+      .hasText(i18n("topics.none.education.unread"));
+  });
+
+  test("renders generic education text when neither newFilter nor unreadFilter is true", async function (assert) {
+    await render(
+      <template>
+        <EmptyTopicFilter @newFilter={{false}} @unreadFilter={{false}} />
+      </template>
+    );
+
+    assert
+      .dom(".empty-topic-filter__text")
+      .hasText(i18n("topics.none.education.generic"));
+  });
+});

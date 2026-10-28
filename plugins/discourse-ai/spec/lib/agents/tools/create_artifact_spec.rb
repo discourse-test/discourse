@@ -1,0 +1,118 @@
+#frozen_string_literal: true
+
+RSpec.describe DiscourseAi::Agents::Tools::CreateArtifact do
+  fab!(:llm_model)
+  let(:llm) { DiscourseAi::Completions::Llm.proxy(llm_model) }
+
+  fab!(:post)
+
+  before do
+    enable_current_plugin
+    SiteSetting.ai_bot_enabled = true
+  end
+
+  describe "#process" do
+    it "ignores non-text completion events while generating artifact code" do
+      artifact_source = <<~TXT.strip
+        [HTML]
+        <div>Generated</div>
+        [/HTML]
+      TXT
+      thinking =
+        DiscourseAi::Completions::Thinking.new(
+          message: nil,
+          provider_info: {
+            gemini_interactions: {
+              steps: [{ signature: "signed-context" }],
+            },
+          },
+        )
+      tool = nil
+      result = nil
+
+      DiscourseAi::Completions::Llm.with_prepared_responses([[artifact_source, thinking]]) do
+        tool =
+          described_class.new(
+            { html_body: "hello" },
+            bot_user: Fabricate(:user),
+            llm: llm,
+            context: DiscourseAi::Agents::BotContext.new(post: post),
+          )
+        tool.parameters = { name: "generated", specification: "generate an artifact" }
+
+        result = tool.invoke {}
+      end
+
+      expect(result[:status]).to eq("success")
+      expect(AiArtifact.order(:id).last.html).to eq("<div>Generated</div>")
+      expect(tool.custom_raw).not_to include(
+        thinking.provider_info_for(:gemini_interactions)[:steps].first[:signature],
+      )
+    end
+
+    it "correctly adds details block on final invoke" do
+      responses = [<<~TXT.strip]
+          [HTML]
+          <div>
+            hello
+          </div>
+          [/HTML]
+          [CSS]
+          .hello {
+            color: red;
+          }
+          [/CSS]
+          [JavaScript]
+          console.log("hello");
+          console.log("world");
+          [/JavaScript]
+        TXT
+
+      tool = nil
+
+      DiscourseAi::Completions::Llm.with_prepared_responses(responses) do
+        tool =
+          described_class.new(
+            { html_body: "hello" },
+            bot_user: Fabricate(:user),
+            llm: llm,
+            context: DiscourseAi::Agents::BotContext.new(post: post),
+          )
+
+        tool.parameters = { name: "hello", specification: "hello spec" }
+
+        tool.invoke {}
+      end
+
+      artifact_id = AiArtifact.order("id desc").limit(1).pluck(:id).first
+
+      expected = <<~MD
+        [details="View Source"]
+        ### HTML
+        ```html
+        <div>
+          hello
+        </div>
+        ```
+
+        ### CSS
+        ```css
+        .hello {
+          color: red;
+        }
+        ```
+
+        ### JavaScript
+        ```javascript
+        console.log("hello");
+        console.log("world");
+        ```
+        [/details]
+
+        ### Preview
+        [ai-artifact id="#{artifact_id}"]
+      MD
+      expect(tool.custom_raw.strip).to eq(expected.strip)
+    end
+  end
+end

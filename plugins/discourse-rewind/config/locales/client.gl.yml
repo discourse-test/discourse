@@ -1,0 +1,25 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+gl:
+  js:
+    discourse_rewind:
+      share:
+        toggle_label:
+          private: "Privada"
+          public: "Pública"
+      reports:
+        reading_time:
+          title: Tempo de lectura
+        chat_usage:
+          author: Vostede
+          author_others: "%{username}"
+        live_usage:
+          minutes:
+            one: "%{count} min."
+            other: "%{count} min."
+        writing_analysis:
+          menu_other: Outro

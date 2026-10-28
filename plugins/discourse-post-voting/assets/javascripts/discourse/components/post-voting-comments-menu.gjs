@@ -1,0 +1,107 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { action } from "@ember/object";
+import { schedule } from "@ember/runloop";
+import { service } from "@ember/service";
+import { Promise } from "rsvp";
+import routeAction from "discourse/helpers/route-action";
+import { ajax } from "discourse/lib/ajax";
+import { popupAjaxError } from "discourse/lib/ajax-error";
+import DButton from "discourse/ui-kit/d-button";
+import { i18n } from "discourse-i18n";
+import PostVotingCommentsMenuComposer from "./post-voting-comments-menu-composer.gjs";
+
+export default class PostVotingCommentsMenu extends Component {
+  @service currentUser;
+
+  @tracked expanded = false;
+
+  get hasMoreComments() {
+    return this.args.moreCommentCount > 0;
+  }
+
+  @action
+  handleSave(comment) {
+    this.closeComposer();
+    this.args.appendComments([comment]);
+  }
+
+  @action
+  expandComposer() {
+    this.expanded = true;
+
+    this.fetchComments().then(() => {
+      schedule("afterRender", () => {
+        const textArea = document.querySelector(
+          `#post_${this.args.postNumber} .post-voting-comments__composer .post-voting-comments__composer-textarea`
+        );
+        textArea.focus();
+        textArea.select();
+      });
+    });
+  }
+
+  @action
+  closeComposer() {
+    this.expanded = false;
+  }
+
+  @action
+  fetchComments() {
+    if (!this.args.id) {
+      return Promise.resolve();
+    }
+
+    const data = {
+      post_id: this.args.id,
+      last_comment_id: this.args.lastCommentId,
+    };
+
+    return ajax("/post_voting/comments", {
+      type: "GET",
+      data,
+    })
+      .then((response) => {
+        if (response.comments.length > 0) {
+          this.args.appendComments(response.comments);
+        }
+      })
+      .catch(popupAjaxError);
+  }
+
+  <template>
+    <div class="post-voting-comments__footer">
+      {{#if this.expanded}}
+        <PostVotingCommentsMenuComposer
+          @id={{@id}}
+          @onCancel={{this.closeComposer}}
+          @onSave={{this.handleSave}}
+        />
+      {{else}}
+        <div class="post-voting-comments__actions">
+          <DButton
+            class="btn-transparent --primary btn-small post-voting-comments__actions-add"
+            @action={{if
+              this.currentUser
+              this.expandComposer
+              (routeAction "showLogin")
+            }}
+            @label="post_voting.post.post_voting_comment.add"
+          />
+
+          {{#if this.hasMoreComments}}
+            <DButton
+              class="btn-transparent --primary btn-small post-voting-comments__actions-show-more"
+              @action={{this.fetchComments}}
+              @translatedLabel={{i18n
+                "post_voting.post.post_voting_comment.show"
+                count=@moreCommentCount
+              }}
+            />
+
+          {{/if}}
+        </div>
+      {{/if}}
+    </div>
+  </template>
+}

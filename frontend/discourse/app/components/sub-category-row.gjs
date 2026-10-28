@@ -1,0 +1,75 @@
+import CategoryListItem from "discourse/components/category-list-item";
+import CategoryTitleLink from "discourse/components/category-title-link";
+import SubCategoryItem from "discourse/components/sub-category-item";
+import borderColor from "discourse/helpers/border-color";
+import DDecoratedHtml from "discourse/ui-kit/d-decorated-html";
+import dDirSpan from "discourse/ui-kit/helpers/d-dir-span";
+
+export default class SubCategoryRow extends CategoryListItem {
+  <template>
+    {{#unless this.isHidden}}
+      {{#if this.site.mobileView}}
+        <tr
+          class="subcategory-list-item category {{if this.isMuted 'muted'}}"
+          data-category-id={{this.category.id}}
+          style={{borderColor this.category.color}}
+        >
+          <td>
+            <CategoryTitleLink @category={{this.category}} @tagName="h4" />
+            <div class="subcategories-list">
+              {{#if this.displayedSubcategories}}
+                <div class="subcategories">
+                  {{#each this.displayedSubcategories as |subcategory|}}
+                    <SubCategoryItem
+                      @category={{subcategory}}
+                      @listType={{this.listType}}
+                    />
+                  {{/each}}
+                </div>
+              {{/if}}
+            </div>
+          </td>
+        </tr>
+      {{else}}
+        <tr
+          class="{{if
+              this.category.description_excerpt
+              'has-description'
+              'no-description'
+            }}
+            {{if this.category.uploaded_logo.url 'has-logo' 'no-logo'}}"
+          data-category-id={{this.category.id}}
+          data-notification-level={{this.category.notificationLevelString}}
+        >
+          <td
+            class="category {{if this.isMuted 'muted'}}"
+            style={{borderColor this.category.color}}
+          >
+            <CategoryTitleLink @category={{this.category}} @tagName="h4" />
+            {{#if this.category.description_excerpt}}
+              <div class="category-description subcategory-description">
+                <DDecoratedHtml
+                  @html={{dDirSpan
+                    this.category.description_excerpt
+                    htmlSafe="true"
+                  }}
+                />
+              </div>
+            {{/if}}
+            {{#if this.displayedSubcategories}}
+              <div class="subcategories">
+                {{#each this.displayedSubcategories as |subsubcategory|}}
+                  <SubCategoryItem
+                    @category={{subsubcategory}}
+                    @hideUnread="true"
+                    @listType={{this.listType}}
+                  />
+                {{/each}}
+              </div>
+            {{/if}}
+          </td>
+        </tr>
+      {{/if}}
+    {{/unless}}
+  </template>
+}

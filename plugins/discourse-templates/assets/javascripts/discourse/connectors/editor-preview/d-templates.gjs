@@ -1,0 +1,73 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import DButton from "discourse/ui-kit/d-button";
+import FilterableList from "../../components/d-templates/filterable-list.gjs";
+
+const SELECTOR_EDITOR_PREVIEW =
+  "#reply-control .d-editor-preview-wrapper > .d-editor-preview";
+
+export default class DTemplatesEditorPreview extends Component {
+  static shouldRender(args, context) {
+    return !context.site.mobileView;
+  }
+
+  @service appEvents;
+
+  @tracked templatesVisible = false;
+  @tracked onInsertTemplate;
+
+  constructor() {
+    super(...arguments);
+
+    this.appEvents.on("discourse-templates:show", this, "show");
+    this.appEvents.on("discourse-templates:hide", this, "hide");
+  }
+
+  willDestroy() {
+    super.willDestroy(...arguments);
+
+    this.appEvents.off("discourse-templates:show", this, "show");
+    this.appEvents.off("discourse-templates:hide", this, "hide");
+  }
+
+  @action
+  show({ onInsertTemplate }) {
+    const elemEditorPreview = document.querySelector(SELECTOR_EDITOR_PREVIEW);
+    if (elemEditorPreview) {
+      elemEditorPreview.style.display = "none";
+    }
+
+    this.onInsertTemplate = onInsertTemplate;
+    this.templatesVisible = true;
+  }
+
+  @action
+  hide() {
+    const elemEditorPreview = document.querySelector(SELECTOR_EDITOR_PREVIEW);
+    if (elemEditorPreview) {
+      elemEditorPreview.style.display = "";
+    }
+
+    this.templatesVisible = false;
+  }
+
+  <template>
+    <div class="d-templates" ...attributes>
+      {{#if this.templatesVisible}}
+        <div class="d-templates-container">
+          <DButton
+            class="modal-close close btn-flat"
+            @action={{this.hide}}
+            @icon="xmark"
+          />
+          <FilterableList
+            @onAfterInsertTemplate={{this.hide}}
+            @onInsertTemplate={{this.onInsertTemplate}}
+          />
+        </div>
+      {{/if}}
+    </div>
+  </template>
+}

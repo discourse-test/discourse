@@ -1,0 +1,25 @@
+import DSaveControls from "discourse/ui-kit/d-save-controls";
+import { i18n } from "discourse-i18n";
+import SubscribeCard from "../../../../components/subscribe-card.gjs";
+
+export default <template>
+  <h3>{{i18n
+      "discourse_subscriptions.user.subscriptions.update_card.heading"
+      sub_id=@controller.model
+    }}</h3>
+
+  <div class="form-vertical">
+    <div class="control-group">
+      <SubscribeCard
+        class="input-xxlarge"
+        @cardElement={{@controller.cardElement}}
+      />
+    </div>
+
+    <DSaveControls
+      @action={{@controller.updatePaymentMethod}}
+      @saved={{@controller.saved}}
+      @saveDisabled={{@controller.loading}}
+    />
+  </div>
+</template>

@@ -1,0 +1,73 @@
+<div class="github-row{{#pr_status}} --gh-status-{{pr_status}}{{/pr_status}}" data-github-private-repo="{{is_private}}">
+  <div class="github-info-container">
+    {{#commit}}
+      <h4>
+        <a href="{{link}}" target="_blank" rel="noopener">{{commit.message.lines.first}}</a>
+      </h4>
+
+      <div class="github-info">
+        <span>
+          {{i18n.commit_by}}
+          <a href="{{author.html_url}}" target="_blank" rel="noopener">
+            <img alt="" src="{{author.avatar_url}}" class="onebox-avatar-inline" width="20" height="20">
+            {{author.login}}
+          </a> - <a href="{{link}}" target="_blank" rel="noopener">{{title}}</a>
+        </span>
+      </div>
+    {{/commit}}
+
+    {{#comment}}
+      <h4>
+        {{i18n.comment_by}}
+        <a href="{{user.html_url}}" target="_blank" rel="noopener">
+          <img alt="" src="{{user.avatar_url}}" class="onebox-avatar-inline" width="20" height="20">
+          {{user.login}}
+        </a> - <a href="{{link}}" target="_blank" rel="noopener">{{title}}</a>
+      </h4>
+    {{/comment}}
+
+    {{#discussion}}
+      <h4>
+        {{i18n.review_by}}
+        <a href="{{user.html_url}}" target="_blank" rel="noopener">
+          <img alt="" src="{{user.avatar_url}}" class="onebox-avatar-inline" width="20" height="20">
+          {{user.login}}
+        </a> - <a href="{{link}}" target="_blank" rel="noopener">{{title}}</a>
+      </h4>
+    {{/discussion}}
+
+    {{#pr}}
+      <h4>
+        <a href="{{link}}" target="_blank" rel="noopener">{{title}} (#{{number}})</a>
+      </h4>
+    {{/pr}}
+
+    <div class="branches">
+      <code>{{base.label}}</code> ← <code>{{head.label}}</code>
+    </div>
+
+    {{#pr}}
+      <div class="github-info">
+        <div class="user">
+          <a href="{{user.html_url}}" target="_blank" rel="noopener">
+            <img alt="" src="{{user.avatar_url}}" class="onebox-avatar-inline" width="20" height="20">
+            {{user.login}}
+          </a>
+        </div>
+
+        <div class="date">
+          {{^pr_status}}{{i18n.opened}} {{/pr_status}}<span class="discourse-local-date" data-format="ll" data-date="{{status_date_date}}" data-time="{{status_date_time}}" data-timezone="UTC">{{status_date}}</span>
+        </div>
+
+        <div class="lines" title="{{i18n.pr_summary}}">
+          <a href="{{html_url}}/files" target="_blank" rel="noopener">
+            <span class="added">+{{additions}}</span>
+            <span class="removed">-{{deletions}}</span>
+          </a>
+        </div>
+      </div>
+    {{/pr}}
+  </div>
+</div>
+
+{{> github/github_body}}

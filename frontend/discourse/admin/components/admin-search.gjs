@@ -1,0 +1,205 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import didUpdate from "@ember/render-modifiers/modifiers/did-update";
+import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
+import discourseDebounce from "discourse/lib/debounce";
+import { INPUT_DELAY } from "discourse/lib/environment";
+import { escapeExpression } from "discourse/lib/utilities";
+import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import dAutoFocus from "discourse/ui-kit/modifiers/d-auto-focus";
+import { i18n } from "discourse-i18n";
+
+export default class AdminSearch extends Component {
+  @service adminSearchDataSource;
+  @service router;
+
+  @tracked filter = this.args.initialFilter ?? "";
+  @tracked searchResults = [];
+  @tracked loading = false;
+  @tracked dataReady = false;
+
+  constructor() {
+    super(...arguments);
+
+    this.adminSearchDataSource.buildMap().then(() => {
+      this.dataReady = true;
+      if (this.filter !== "") {
+        this.loading = true;
+        this.runSearch();
+      }
+    });
+  }
+
+  get noResultsDescription() {
+    return i18n("admin.search.no_results", {
+      filter: escapeExpression(this.filter),
+    });
+  }
+
+  get showLoadingSpinner() {
+    return this.filter !== "" && (this.loading || !this.dataReady);
+  }
+
+  @action
+  changeSearchTerm(event) {
+    this.searchResults = [];
+    this.filter = event.target.value;
+    if (this.filter.length > 0) {
+      this.runSearch();
+    }
+  }
+
+  @action
+  search() {
+    discourseDebounce(this, this.#search, INPUT_DELAY);
+  }
+
+  // TODO (martin) Maybe we can move ListHandler / iterate-list from chat into
+  // core so we can use it here too.
+  @action
+  handleResultKeyDown(event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      event.target.click();
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      event.stopPropagation();
+      const previousResult = event.target.parentElement.previousElementSibling;
+      if (previousResult) {
+        previousResult.firstElementChild?.focus();
+      } else {
+        document.querySelector(".admin-search__input-field").focus();
+      }
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      event.stopPropagation();
+      event.target.parentElement.nextElementSibling.firstElementChild?.focus();
+    }
+  }
+
+  @action
+  handleSearchKeyDown(event) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      event.stopPropagation();
+      document
+        .querySelector(".admin-search__result .admin-search__result-link")
+        .focus();
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.router.transitionTo("adminSearch.index", {
+        queryParams: { filter: this.filter },
+      });
+    }
+  }
+
+  @action
+  initialFilterUpdated() {
+    this.filter = this.args.initialFilter;
+    this.runSearch();
+  }
+
+  @action
+  runSearch() {
+    this.loading = true;
+    this.search();
+  }
+
+  #search() {
+    this.searchResults = this.adminSearchDataSource.search(this.filter);
+    this.loading = false;
+  }
+
+  <template>
+    <div
+      class="admin-search__input-container
+        {{if this.searchResults '--has-results'}}
+        "
+      {{didUpdate this.initialFilterUpdated @initialFilter}}
+    >
+      <div class="admin-search__input-group">
+        {{dIcon "magnifying-glass" class="admin-search__input-icon"}}
+        <input
+          class="admin-search__input-field"
+          placeholder={{i18n "admin.search.instructions"}}
+          type="text"
+          value={{this.filter}}
+          {{dAutoFocus}}
+          {{on "input" this.changeSearchTerm}}
+          {{on "keydown" this.handleSearchKeyDown}}
+        />
+      </div>
+    </div>
+    <div aria-live="polite" class="sr-only" role="status">
+      {{#if this.searchResults}}
+        {{i18n
+          "admin.search.result_count"
+          count=this.searchResults.length
+          filter=this.filter
+        }}
+      {{/if}}
+      {{#if
+        (and
+          this.filter
+          (not this.searchResults.length)
+          (not this.showLoadingSpinner)
+        )
+      }}
+        {{this.noResultsDescription}}
+      {{/if}}
+    </div>
+    {{#if
+      (and
+        this.filter
+        (not this.searchResults.length)
+        (not this.showLoadingSpinner)
+      )
+    }}
+      <p aria-live="polite" class="admin-search__no-results" role="status">
+        {{this.noResultsDescription}}
+      </p>
+    {{/if}}
+    <div
+      class="admin-search__results {{if this.searchResults '--has-results'}}"
+    >
+      <DConditionalLoadingSpinner @condition={{this.showLoadingSpinner}}>
+        {{#each this.searchResults as |result|}}
+          <div class="admin-search__result" data-result-type={{result.type}}>
+            <a
+              class="admin-search__result-link"
+              href={{result.url}}
+              tabindex="0"
+              {{on "keydown" this.handleResultKeyDown}}
+            >
+              <div class="admin-search__result-name">
+                {{#if result.icon}}
+                  {{dIcon result.icon}}
+                {{/if}}
+                <span
+                  class="admin-search__result-name-label"
+                >{{result.label}}</span>
+              </div>
+              {{#if result.description}}
+                <div class="admin-search__result-description">{{trustHTML
+                    result.description
+                  }}</div>
+              {{/if}}
+            </a>
+          </div>
+        {{/each}}
+      </DConditionalLoadingSpinner>
+    </div>
+  </template>
+}

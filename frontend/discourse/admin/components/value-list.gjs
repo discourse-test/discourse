@@ -1,0 +1,279 @@
+/* eslint-disable ember/no-classic-components, ember/require-tagless-components */
+import { tracked } from "@glimmer/tracking";
+import Component, { Input } from "@ember/component";
+import { fn, hash } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { action, computed } from "@ember/object";
+import { service } from "@ember/service";
+import { isEmpty } from "@ember/utils";
+import { classNames } from "@ember-decorators/component";
+import {
+  addUniqueValueToArray,
+  removeValueFromArray,
+  uniqueItemsFromArray,
+} from "discourse/lib/array-tools";
+import { makeArray } from "discourse/lib/helpers";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
+import ComboBox from "discourse/select-kit/components/combo-box";
+import DButton from "discourse/ui-kit/d-button";
+import DReorderableList from "discourse/ui-kit/d-reorderable-list";
+
+const INDEX_KEY = "@index";
+
+/**
+ * Renders its rows through the shared reorderable list when
+ * `enable_new_reordering_controls` is on, and through the legacy rows
+ * otherwise. The branch lives here so every caller follows the change.
+ *
+ * TODO (ui-kit-reorderable-list-cleanup) delete the legacy arm and the
+ * members marked for it once the change ships.
+ */
+@classNames("value-list")
+export default class ValueList extends Component {
+  @service siteSettings;
+
+  /** @type {string[] | null} */
+  @autoTrackedArray collection = null;
+
+  /** @type {string | null} */
+  inputDelimiter = null;
+
+  /** @type {"array" | null} */
+  inputType = null;
+  newValue = "";
+
+  /** @type {string | string[] | null | undefined} */
+  values = null;
+
+  /** @type {((values: string[]) => void | Promise<void>) | null} */
+  onChange = null;
+
+  valueLabel = (value) => value;
+
+  @tracked _noneKeyOverride;
+
+  @computed("addKey")
+  get noneKey() {
+    if (this._noneKeyOverride !== undefined) {
+      return this._noneKeyOverride;
+    }
+    return this.addKey;
+  }
+
+  set noneKey(value) {
+    this._noneKeyOverride = value;
+  }
+
+  @computed("newValue")
+  get inputInvalid() {
+    return isEmpty(this.newValue);
+  }
+
+  @computed("choices.[]", "collection.[]")
+  get filteredChoices() {
+    return makeArray(this.choices).filter((i) => !this.collection?.includes(i));
+  }
+
+  // TODO (ui-kit-reorderable-list-cleanup) delete with the legacy arm below.
+  @computed("collection")
+  get showUpDownButtons() {
+    return this.collection.length - 1 ? true : false;
+  }
+
+  didReceiveAttrs() {
+    super.didReceiveAttrs(...arguments);
+
+    if (this.inputType === "array") {
+      this.set("collection", this.values ? [...this.values] : []);
+      return;
+    }
+
+    this.set(
+      "collection",
+      this._splitValues(this.values, this.inputDelimiter || "\n")
+    );
+  }
+
+  keyDown(event) {
+    if (event.key === "Enter") {
+      this.send("addValue", this.newValue);
+    }
+  }
+
+  @action
+  changeValue(index, event) {
+    this._replaceValue(index, event.target.value);
+  }
+
+  @action
+  addValue(newValue) {
+    if (this.inputInvalid) {
+      return;
+    }
+
+    this.set("newValue", null);
+    this._addValue(newValue);
+  }
+
+  @action
+  removeValue(value) {
+    this._removeValue(value);
+  }
+
+  @action
+  selectChoice(choice) {
+    this._addValue(choice);
+  }
+
+  /**
+   * Applies a committed move onto the collection and persists the new order.
+   * Wrapping and announcements are the list's own.
+   *
+   * @param {import("discourse/ui-kit/d-reorderable-list/types").ReorderableMove<string>} move - The normalized move from the list.
+   */
+  @action
+  handleMove(move) {
+    this.collection.splice(0, this.collection.length, ...move.proposedToItems);
+    this._saveValues();
+  }
+
+  // TODO (ui-kit-reorderable-list-cleanup) delete with the legacy arm below.
+  @action
+  shift(operation, index) {
+    let futureIndex = index + operation;
+
+    if (futureIndex > this.collection.length - 1) {
+      futureIndex = 0;
+    } else if (futureIndex < 0) {
+      futureIndex = this.collection.length - 1;
+    }
+
+    const shiftedValue = this.collection[index];
+    this.collection.splice(index, 1);
+    this.collection.splice(futureIndex, 0, shiftedValue);
+
+    this._saveValues();
+  }
+
+  _addValue(value) {
+    addUniqueValueToArray(this.collection, value);
+
+    if (this.choices) {
+      this.set(
+        "choices",
+        this.choices.filter((choice) => choice.id !== value)
+      );
+    } else {
+      this.set("choices", []);
+    }
+
+    this._saveValues();
+  }
+
+  _removeValue(value) {
+    removeValueFromArray(this.collection, value);
+
+    if (this.choices) {
+      this.set("choices", uniqueItemsFromArray(this.choices.concat([value])));
+    } else {
+      this.set("choices", makeArray(value));
+    }
+
+    this._saveValues();
+  }
+
+  _replaceValue(index, newValue) {
+    this.collection.splice(index, 1, newValue);
+    this._saveValues();
+  }
+
+  _saveValues() {
+    if (this.onChange) {
+      this.onChange([...this.collection]);
+      return;
+    }
+
+    if (this.inputType === "array") {
+      this.set("values", this.collection);
+      return;
+    }
+
+    this.set("values", this.collection.join(this.inputDelimiter || "\n"));
+  }
+
+  _splitValues(values, delimiter) {
+    if (values && values.length) {
+      return values.split(delimiter).filter((x) => x);
+    } else {
+      return [];
+    }
+  }
+
+  <template>
+    {{#if this.collection}}
+      {{#if this.siteSettings.enable_new_reordering_controls}}
+        <DReorderableList
+          class="values"
+          @items={{this.collection}}
+          @itemTag="div"
+          @key={{INDEX_KEY}}
+          @label={{this.valueLabel}}
+          @onMove={{this.handleMove}}
+          @onRemove={{this.removeValue}}
+          @rowClass="value"
+          @tag="div"
+        >
+          <:row as |value controls|>
+            <Input
+              class="value-input"
+              title={{value}}
+              @value={{value}}
+              {{on "focusout" (fn this.changeValue controls.index)}}
+            />
+          </:row>
+        </DReorderableList>
+      {{else}}
+        <div class="values">
+          {{#each this.collection as |value index|}}
+            <div class="value" data-index={{index}}>
+              <DButton
+                class="btn-default remove-value-btn btn-small"
+                @action={{fn this.removeValue value}}
+                @icon="xmark"
+              />
+
+              <Input
+                class="value-input"
+                title={{value}}
+                @value={{value}}
+                {{on "focusout" (fn this.changeValue index)}}
+              />
+
+              {{#if this.showUpDownButtons}}
+                <DButton
+                  class="btn-default shift-up-value-btn btn-small"
+                  @action={{fn this.shift -1 index}}
+                  @icon="arrow-up"
+                />
+                <DButton
+                  class="btn-default shift-down-value-btn btn-small"
+                  @action={{fn this.shift 1 index}}
+                  @icon="arrow-down"
+                />
+              {{/if}}
+            </div>
+          {{/each}}
+        </div>
+      {{/if}}
+    {{/if}}
+
+    <ComboBox
+      @content={{this.filteredChoices}}
+      @nameProperty={{null}}
+      @onChange={{this.selectChoice}}
+      @options={{hash allowAny=true none=this.noneKey disabled=@disabled}}
+      @value={{this.newValue}}
+      @valueProperty={{null}}
+    />
+  </template>
+}

@@ -1,0 +1,9 @@
+# frozen_string_literal: true
+
+DiscourseRewind::Engine.routes.draw do
+  get "/rewinds" => "rewinds#index"
+  put "/rewinds/toggle-share" => "rewinds#toggle_share"
+  post "/rewinds/dismiss" => "rewinds#dismiss"
+end
+
+Discourse::Application.routes.draw { mount ::DiscourseRewind::Engine, at: "/" }

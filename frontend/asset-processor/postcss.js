@@ -1,0 +1,31 @@
+import "core-js/actual/url";
+import postcssLightDark from "@csstools/postcss-light-dark-function";
+import autoprefixer from "autoprefixer";
+import postcss from "postcss";
+import postcssNesting from "postcss-nesting";
+import { browsers } from "../discourse/config/targets.js";
+import postcssVariablePrefixer from "./postcss-variable-prefixer.js";
+import postcssVariableRenamer from "./postcss-variable-renamer.js";
+
+const postCssProcessor = postcss([
+  postcssVariableRenamer(),
+  autoprefixer({
+    overrideBrowserslist: browsers,
+  }),
+  postcssLightDark,
+  postcssNesting, // Un-nests the native css nesting from postcssLightDark
+  postcssVariablePrefixer(),
+]);
+globalThis.postCss = async function (css, map, sourcemapFile) {
+  const rawResult = await postCssProcessor.process(css, {
+    from: "input.css",
+    to: "output.css",
+    map: {
+      prev: map,
+      inline: false,
+      absolute: false,
+      annotation: sourcemapFile,
+    },
+  });
+  return [rawResult.css, rawResult.map?.toString()];
+};

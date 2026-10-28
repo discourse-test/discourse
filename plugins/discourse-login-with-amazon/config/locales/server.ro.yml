@@ -1,0 +1,12 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+ro:
+  site_settings:
+    login_with_amazon_client_id: "ID client autentificare cu Amazon"
+    login_with_amazon_client_secret: "Secret client autentificare cu Amazon"
+    login_with_amazon_scope: "Scopuri OAuth2 autentificare cu Amazon (separate prin spații)"
+    login_with_amazon_overrides_email: "Suprascrie adresa de email din contul de utilizator Discourse."

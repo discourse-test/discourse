@@ -1,0 +1,120 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import AdminOnboardingBanner from "discourse/components/admin-onboarding/banner";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import lazyHash from "discourse/helpers/lazy-hash";
+import Navbar from "discourse/plugins/chat/discourse/components/chat/navbar";
+import ChatSidePanel from "discourse/plugins/chat/discourse/components/chat-side-panel";
+import FullPageChat from "discourse/plugins/chat/discourse/components/full-page-chat";
+
+export default class ChatRoutesChannel extends Component {
+  @service site;
+  @service siteSettings;
+  @service chat;
+  @service chatHistory;
+  @service chatTrackingStateManager;
+  @service currentUser;
+
+  @tracked isFiltering = false;
+
+  get canSearchChat() {
+    return this.currentUser && this.siteSettings.chat_search_enabled;
+  }
+
+  get getChannelsRoute() {
+    if (this.chatHistory.previousRoute?.name === "chat.browse") {
+      return "chat.browse";
+    } else if (
+      this.chatHistory.previousRoute?.name === "chat.starred-channels"
+    ) {
+      return "chat.starred-channels";
+    } else if (this.args.channel.isDirectMessageChannel) {
+      return "chat.direct-messages";
+    } else {
+      return "chat.channels";
+    }
+  }
+
+  get otherChannelsUrgentCount() {
+    return this.chatTrackingStateManager.allChannelUrgentCount({
+      exclude: this.args.channel,
+    });
+  }
+
+  get otherChannelsMentionCount() {
+    return this.chatTrackingStateManager.allChannelMentionCount({
+      exclude: this.args.channel,
+    });
+  }
+
+  get otherChannelsUnreadCount() {
+    return this.chatTrackingStateManager.publicChannelUnreadCount({
+      exclude: this.args.channel,
+    });
+  }
+
+  get otherChannelsHasUnreadThreads() {
+    return this.chatTrackingStateManager.hasUnreadThreads({
+      exclude: this.args.channel,
+    });
+  }
+
+  @action
+  toggleIsFiltering() {
+    this.isFiltering = !this.isFiltering;
+    this.chat.activeMessage = null;
+  }
+
+  <template>
+    <div class="c-routes --channel">
+      <Navbar as |navbar|>
+        {{#if this.site.mobileView}}
+          <navbar.BackButton
+            @hasUnreadThreads={{this.otherChannelsHasUnreadThreads}}
+            @mentionCount={{this.otherChannelsMentionCount}}
+            @route={{this.getChannelsRoute}}
+            @unreadCount={{this.otherChannelsUnreadCount}}
+            @urgentCount={{this.otherChannelsUrgentCount}}
+          />
+        {{/if}}
+        <navbar.ChannelTitle @channel={{@channel}} />
+        <navbar.Actions as |a|>
+          {{#if this.canSearchChat}}
+            <a.Filter
+              @channel={{@channel}}
+              @isFiltering={{this.isFiltering}}
+              @onToggleFilter={{this.toggleIsFiltering}}
+            />
+          {{/if}}
+
+          <a.OpenDrawerButton />
+          <a.PinnedMessagesButton @channel={{@channel}} />
+          <a.ThreadsListButton @channel={{@channel}} />
+          <PluginOutlet
+            @name="chat-channel-navbar-actions"
+            @outletArgs={{lazyHash channel=@channel}}
+          />
+        </navbar.Actions>
+      </Navbar>
+
+      <FullPageChat
+        @channel={{@channel}}
+        @isFiltering={{this.isFiltering}}
+        @onToggleFilter={{this.toggleIsFiltering}}
+        @targetMessageId={{@targetMessageId}}
+      >
+        <:aboveMessages>
+          {{#if this.siteSettings.enable_site_owner_onboarding}}
+            <AdminOnboardingBanner @location="chat_channel" />
+          {{/if}}
+        </:aboveMessages>
+      </FullPageChat>
+    </div>
+
+    <ChatSidePanel>
+      {{outlet}}
+    </ChatSidePanel>
+  </template>
+}

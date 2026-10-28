@@ -1,0 +1,50 @@
+import Component from "@glimmer/component";
+import didInsert from "@ember/render-modifiers/modifiers/did-insert";
+import UppyUpload from "discourse/lib/uppy/uppy-upload";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import { i18n } from "discourse-i18n";
+
+export default class ImagesUploader extends Component {
+  uppyUpload = new UppyUpload(this, {
+    id: "images-uploader",
+    type: "avatar",
+    validateUploadedFilesOptions: {
+      imagesOnly: true,
+    },
+    uploadDone: (upload) => {
+      this.args.done(upload);
+    },
+  });
+
+  get uploadingOrProcessing() {
+    return this.uppyUpload.uploading || this.uppyUpload.processing;
+  }
+
+  get uploadButtonText() {
+    return this.uploadingOrProcessing ? i18n("uploading") : i18n("upload");
+  }
+
+  <template>
+    <span ...attributes>
+      <label
+        class="btn"
+        disabled={{this.uploadingOrProcessing}}
+        title={{i18n "admin.site_settings.uploaded_image_list.upload.title"}}
+      >
+        {{dIcon "far-image"}}&nbsp;{{this.uploadButtonText}}
+        <input
+          accept="image/*"
+          class="hidden-upload-field"
+          disabled={{this.uppyUpload.uploading}}
+          multiple
+          type="file"
+          {{didInsert this.uppyUpload.setup}}
+        />
+      </label>
+      {{#if this.uploadingOrProcessing}}
+        <span>{{i18n "upload_selector.uploading"}}
+          {{this.uppyUpload.uploadProgress}}%</span>
+      {{/if}}
+    </span>
+  </template>
+}

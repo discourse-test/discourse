@@ -1,0 +1,43 @@
+import Component from "@glimmer/component";
+import { hash } from "@ember/helper";
+import { action } from "@ember/object";
+import EmailGroupUserChooser from "discourse/select-kit/components/email-group-user-chooser";
+import { i18n } from "discourse-i18n";
+
+export default class AssignedAdvancedSearch extends Component {
+  static shouldRender(args, { currentUser }) {
+    return currentUser?.can_assign_globally;
+  }
+
+  @action
+  onChangeAssigned(value) {
+    this.args.onChangeSearchedTermField(
+      "assigned",
+      "updateSearchTermForAssignedUsername",
+      value
+    );
+  }
+
+  <template>
+    <div class="assigned-advanced-search" ...attributes>
+      <div class="control-group">
+        <label class="control-label" for="search-assigned-to">
+          {{i18n "search.advanced.assigned.label"}}
+        </label>
+
+        <div class="controls">
+          <EmailGroupUserChooser
+            @onChange={{this.onChangeAssigned}}
+            @options={{hash
+              maximum=1
+              excludeCurrentUser=false
+              includeGroups=true
+              customSearchOptions=(hash assignableGroups=true)
+            }}
+            @value={{@searchedTerms.assigned}}
+          />
+        </div>
+      </div>
+    </div>
+  </template>
+}

@@ -1,0 +1,10 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+zh_TW:
+  site_settings:
+    presence_enabled: "顯示目前正在回覆此主題或編輯此貼文的使用者？"
+    presence_max_users_shown: "顯示的使用者數量上限。"

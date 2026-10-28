@@ -1,0 +1,51 @@
+import Component from "@glimmer/component";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import dEmoji from "discourse/ui-kit/helpers/d-emoji";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+
+export default class PostMetaDataPosterNameIcon extends Component {
+  get emojis() {
+    if (!this.args.emoji) {
+      return;
+    }
+
+    return this.args.emoji.split("|");
+  }
+
+  get skipEmojiTitle() {
+    return !this.args.emojiTitle;
+  }
+
+  <template>
+    <span class={{dConcatClass "poster-icon" @className}} title={{@title}}>
+      {{#if @url}}
+        <a href={{@url}}>
+          <Content
+            @emojis={{this.emojis}}
+            @emojiTitle={{@emojiTitle}}
+            @icon={{@icon}}
+            @text={{@text}}
+          />
+        </a>
+      {{else}}
+        <Content
+          @emojis={{this.emojis}}
+          @emojiTitle={{@emojiTitle}}
+          @icon={{@icon}}
+          @text={{@text}}
+        />
+      {{/if}}
+    </span>
+  </template>
+}
+
+const Content = <template>
+  {{#if @icon}}
+    {{dIcon @icon}}
+  {{else if @emojis}}
+    {{#each @emojis as |emojiName|}}
+      {{dEmoji emojiName skipEmojiTitle=(not @emojiTitle) title=@emojiTitle}}
+    {{/each}}
+  {{/if}}
+  {{@text}}
+</template>;

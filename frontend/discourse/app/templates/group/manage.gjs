@@ -1,0 +1,20 @@
+import { LinkTo } from "@ember/routing";
+import DHorizontalOverflowNav from "discourse/ui-kit/d-horizontal-overflow-nav";
+import { i18n } from "discourse-i18n";
+
+export default <template>
+  <section class="user-secondary-navigation">
+    <DHorizontalOverflowNav class="activity-nav">
+      {{#each @controller.tabs as |tab|}}
+        <li>
+          <LinkTo @model={{@controller.model.name}} @route={{tab.route}}>
+            {{i18n tab.title}}
+          </LinkTo>
+        </li>
+      {{/each}}
+    </DHorizontalOverflowNav>
+  </section>
+  <section class="user-content" id="user-content">
+    {{outlet}}
+  </section>
+</template>

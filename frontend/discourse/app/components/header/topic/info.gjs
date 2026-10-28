@@ -1,0 +1,222 @@
+import Component from "@glimmer/component";
+import { hash } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
+import TopicStatus from "discourse/components/topic-status";
+import lazyHash from "discourse/helpers/lazy-hash";
+import { wantsNewWindow } from "discourse/lib/intercept-click";
+import renderTags from "discourse/lib/render-tags";
+import { scrollTop } from "discourse/lib/scroll-top";
+import DiscourseURL from "discourse/lib/url";
+import dCategoryLink from "discourse/ui-kit/helpers/d-category-link";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import { i18n } from "discourse-i18n";
+import PluginOutlet from "../../plugin-outlet.gjs";
+import FeaturedLink from "./featured-link.gjs";
+import Participant from "./participant.gjs";
+
+export default class Info extends Component {
+  @service currentUser;
+  @service site;
+  @service siteSettings;
+
+  get showPM() {
+    return (
+      !this.args.topicInfo.is_warning && this.args.topicInfo.isPrivateMessage
+    );
+  }
+
+  get totalParticipants() {
+    return (
+      (this.args.topicInfo.details.allowed_users?.length || 0) +
+      (this.args.topicInfo.allowed_groups?.length || 0)
+    );
+  }
+
+  get maxExtraItems() {
+    return this.args.topicInfo.tags?.length > 0 ? 5 : 10;
+  }
+
+  get twoRows() {
+    return (
+      this.tags?.length ||
+      this.showPM ||
+      this.siteSettings.topic_featured_link_enabled
+    );
+  }
+
+  get tags() {
+    if (this.args.topicInfo.get("tags")) {
+      return renderTags(this.args.topicInfo);
+    }
+  }
+
+  get remainingParticipantCount() {
+    return this.totalParticipants - this.maxExtraItems;
+  }
+
+  get participants() {
+    const participants = [
+      ...this.args.topicInfo.details.allowed_users,
+      ...this.args.topicInfo.details.allowed_groups,
+    ];
+    return participants.slice(0, this.maxExtraItems);
+  }
+
+  get pmHref() {
+    return this.currentUser.pmPath(this.args.topicInfo);
+  }
+
+  @action
+  jumpToTopPost(e) {
+    if (wantsNewWindow(e)) {
+      return;
+    }
+
+    e.preventDefault();
+    if (this.args.topicInfo) {
+      if (this.args.topicInfo.is_nested_view) {
+        scrollTop();
+        return;
+      }
+
+      DiscourseURL.routeTo(this.args.topicInfo.firstPostUrl, {
+        keepFilter: true,
+      });
+    }
+  }
+
+  <template>
+    <div
+      class={{dConcatClass (if this.twoRows "two-rows") "extra-info-wrapper"}}
+    >
+      <PluginOutlet
+        @name="header-topic-info__before"
+        @outletArgs={{lazyHash topic=@topicInfo}}
+      />
+      <div class={{dConcatClass (if this.twoRows "two-rows") "extra-info"}}>
+        <div class="title-wrapper">
+          <h1 class="header-title">
+            {{#if this.showPM}}
+              <a
+                aria-label={{i18n "user.messages.inbox"}}
+                class="private-message-glyph-wrapper"
+                href={{this.pmHref}}
+              >
+                {{dIcon "envelope" class="private-message-glyph"}}
+              </a>
+            {{/if}}
+
+            {{#if (and @topicInfo.fancyTitle @topicInfo.url)}}
+              <TopicStatus
+                @context="header"
+                @disableActions={{@disableActions}}
+                @topic={{@topicInfo}}
+              />
+
+              <a
+                class="topic-link"
+                data-topic-id={{@topicInfo.id}}
+                href={{@topicInfo.url}}
+                {{on "click" this.jumpToTopPost}}
+              >
+                <span>{{trustHTML @topicInfo.fancyTitle}}</span>
+              </a>
+
+              <span class="header-topic-title-suffix">
+                <PluginOutlet
+                  @name="header-topic-title-suffix"
+                  @outletArgs={{lazyHash topic=@topicInfo}}
+                />
+              </span>
+            {{/if}}
+          </h1>
+
+          {{#if (or @topicInfo.details.loaded @topicInfo.category)}}
+            {{#if
+              (and
+                @topicInfo.category
+                (or
+                  (not @topicInfo.category.isUncategorizedCategory)
+                  (not this.siteSettings.suppress_uncategorized_badge)
+                )
+              )
+            }}
+              <div class="categories-wrapper">
+                <PluginOutlet
+                  @name="header-categories-wrapper"
+                  @outletArgs={{lazyHash
+                    category=@topicInfo.category
+                    topic=@topicInfo
+                  }}
+                >
+                  {{#if @topicInfo.category.parentCategory}}
+                    {{#if
+                      (and
+                        @topicInfo.category.parentCategory.parentCategory
+                        this.site.desktopView
+                      )
+                    }}
+                      {{dCategoryLink
+                        @topicInfo.category.parentCategory.parentCategory
+                        (hash hideParent="true")
+                      }}
+                    {{/if}}
+
+                    {{dCategoryLink
+                      @topicInfo.category.parentCategory
+                      (hash hideParent="true")
+                    }}
+                  {{/if}}
+                  {{dCategoryLink @topicInfo.category (hash hideParent="true")}}
+                </PluginOutlet>
+              </div>
+            {{/if}}
+
+            <div class="topic-header-extra">
+              <PluginOutlet
+                @name="header-tags-wrapper"
+                @outletArgs={{lazyHash topic=@topicInfo tags=@topicInfo.tags}}
+              >
+                {{trustHTML this.tags}}
+              </PluginOutlet>
+              {{#if this.showPM}}
+                <div class="topic-header-participants">
+                  {{#each this.participants as |participant|}}
+                    <Participant
+                      @type={{if participant.username "user" "group"}}
+                      @user={{participant}}
+                      {{! username for user, name for group }}
+                      @username={{or participant.username participant.name}}
+                    />
+                  {{/each}}
+
+                  {{#if (gt this.totalParticipants this.maxExtraItems)}}
+                    <a
+                      class="more-participants"
+                      data-topic-id={{@topicInfo.id}}
+                      href={{@topicInfo.url}}
+                      {{on "click" this.jumpToTopPost}}
+                    >
+                      +{{this.remainingParticipantCount}}
+                    </a>
+                  {{/if}}
+                </div>
+              {{/if}}
+              {{#if this.siteSettings.topic_featured_link_enabled}}
+                <FeaturedLink @topicInfo={{@topicInfo}} />
+              {{/if}}
+            </div>
+          {{/if}}
+        </div>
+      </div>
+      <PluginOutlet
+        @name="header-topic-info__after"
+        @outletArgs={{lazyHash topic=@topicInfo}}
+      />
+    </div>
+  </template>
+}

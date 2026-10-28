@@ -1,0 +1,18 @@
+import Component from "@glimmer/component";
+import AiFullPageSearch from "../../components/ai-full-page-search.gjs";
+
+export default class AiFullPageSearchConnector extends Component {
+  static shouldRender(args, { siteSettings }) {
+    return siteSettings.ai_embeddings_semantic_search_enabled;
+  }
+
+  <template>
+    <AiFullPageSearch
+      @addSearchResults={{@outletArgs.addSearchResults}}
+      @model={{@outletArgs.model}}
+      @searchTerm={{@outletArgs.searchTerm}}
+      @searchType={{@outletArgs.type}}
+      @sortOrder={{@outletArgs.sortOrder}}
+    />
+  </template>
+}

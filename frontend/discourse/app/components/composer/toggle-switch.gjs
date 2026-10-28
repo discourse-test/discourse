@@ -1,0 +1,79 @@
+import Component from "@glimmer/component";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import { formatShortcut } from "discourse/lib/shortcut-format";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import { i18n } from "discourse-i18n";
+
+export default class ComposerToggleSwitch extends Component {
+  @service capabilities;
+
+  shortcut = formatShortcut("ctrl+m");
+
+  get label() {
+    const key = this.args.state
+      ? "composer.switch_to_markdown"
+      : "composer.switch_to_rich_text";
+    if (!this.capabilities.hasKeyboard) {
+      return i18n(`${key}_no_shortcut`);
+    }
+    return i18n(key, { keyboardShortcut: this.shortcut.label });
+  }
+
+  @action
+  mouseDown(event) {
+    if (this.args.preventFocus) {
+      event.preventDefault();
+    }
+  }
+
+  @action
+  handleKeydown(event) {
+    // forward events to parent handlers (like roving button bar)
+    const result = this.args.onKeydown?.(event);
+    if (result) {
+      event.preventDefault();
+    }
+    return result;
+  }
+
+  <template>
+    {{! eslint-disable ember/template-no-pointer-down-event-binding }}
+    <button
+      aria-checked={{if @state "true" "false"}}
+      aria-keyshortcuts={{if this.capabilities.hasKeyboard this.shortcut.aria}}
+      aria-label={{this.label}}
+      class={{dConcatClass
+        "composer-toggle-switch"
+        (if @state "--rte" "--markdown")
+      }}
+      data-rich-editor={{@state}}
+      disabled={{@disabled}}
+      role="switch"
+      title={{this.label}}
+      type="button"
+      ...attributes
+      {{on "mousedown" this.mouseDown}}
+      {{on "keydown" this.handleKeydown}}
+    >
+      <span class="composer-toggle-switch__slider">
+        <span
+          aria-hidden="true"
+          class={{dConcatClass
+            "composer-toggle-switch__left-icon"
+            (unless @state "--active")
+          }}
+        >{{dIcon "fab-markdown"}}</span>
+        <span
+          aria-hidden="true"
+          class={{dConcatClass
+            "composer-toggle-switch__right-icon"
+            (if @state "--active")
+          }}
+        >{{dIcon "a"}}</span>
+      </span>
+    </button>
+  </template>
+}

@@ -1,0 +1,467 @@
+import { setupTest } from "ember-qunit";
+import { module, test } from "qunit";
+import userSearch from "discourse/lib/user-search";
+import pretender, {
+  middlewareRateLimit,
+  response,
+} from "discourse/tests/helpers/create-pretender";
+import { CANCELLED_STATUS } from "discourse/ui-kit/modifiers/d-autocomplete";
+
+module("Unit | Utility | user-search", function (hooks) {
+  setupTest(hooks);
+
+  hooks.beforeEach(function () {
+    pretender.get("/u/search/users", (request) => {
+      // special responder for per category search
+      const categoryMatch = request.url.match(/category_id=([0-9]+)/);
+      if (categoryMatch) {
+        if (categoryMatch[1] === "3") {
+          return response({});
+        }
+        return response({
+          users: [
+            {
+              username: `category_${categoryMatch[1]}`,
+              name: "category user",
+              avatar_template:
+                "https://avatars.discourse.org/v3/letter/t/41988e/{size}.png",
+            },
+          ],
+        });
+      }
+
+      if (request.url.match(/no-results/)) {
+        return response({ users: [] });
+      }
+
+      return response({
+        users: [
+          {
+            username: "TeaMoe",
+            name: "TeaMoe",
+            avatar_template:
+              "https://avatars.discourse.org/v3/letter/t/41988e/{size}.png",
+          },
+          {
+            username: "TeamOneJ",
+            name: "J Cobb",
+            avatar_template:
+              "https://avatars.discourse.org/v3/letter/t/3d9bf3/{size}.png",
+          },
+          {
+            username: "kudos",
+            name: "Team Blogeto.com",
+            avatar_template:
+              "/user_avatar/meta.discourse.org/kudos/{size}/62185_1.png",
+          },
+          {
+            username: "RosieLinda",
+            name: "Linda Teaman",
+            avatar_template:
+              "https://avatars.discourse.org/v3/letter/r/bc8723/{size}.png",
+          },
+          {
+            username: "legalatom",
+            name: "Team LegalAtom",
+            avatar_template:
+              "https://avatars.discourse.org/v3/letter/l/a9a28c/{size}.png",
+          },
+          {
+            username: "dzsat_team",
+            name: "Dz Sat Dz Sat",
+            avatar_template:
+              "https://avatars.discourse.org/v3/letter/d/eb9ed0/{size}.png",
+          },
+        ],
+        groups: [
+          {
+            name: "bob",
+            usernames: [],
+          },
+          {
+            name: "team",
+            usernames: [],
+          },
+        ],
+      });
+    });
+  });
+
+  test("it flushes cache when switching categories", async function (assert) {
+    let results = await userSearch({ term: "hello", categoryId: 1 });
+    assert.strictEqual(results[0].username, "category_1");
+    assert.strictEqual(results.length, 1);
+
+    // this is cached ... so let's check the cache is good
+    results = await userSearch({ term: "hello", categoryId: 1 });
+    assert.strictEqual(results[0].username, "category_1");
+    assert.strictEqual(results.length, 1);
+
+    results = await userSearch({ term: "hello", categoryId: 2 });
+    assert.strictEqual(results[0].username, "category_2");
+    assert.strictEqual(results.length, 1);
+  });
+
+  test("it keeps mention search results separate from other search contexts", async function (assert) {
+    const contexts = [];
+    pretender.get("/u/search/users", (request) => {
+      const context = request.queryParams.search_context;
+      contexts.push(context);
+      return response({
+        users: [{ username: context === "mention" ? "mention_user" : "user" }],
+      });
+    });
+
+    let results = await userSearch({ term: "user" });
+    assert.strictEqual(
+      results[0].username,
+      "user",
+      "an ordinary search uses the default context"
+    );
+
+    results = await userSearch({ term: "user", searchContext: "mention" });
+    assert.strictEqual(
+      results[0].username,
+      "mention_user",
+      "mention searches do not reuse ordinary search results"
+    );
+
+    results = await userSearch({ term: "user", searchContext: "mention" });
+    assert.strictEqual(
+      results[0].username,
+      "mention_user",
+      "results are cached within the mention context"
+    );
+    assert.deepEqual(
+      contexts,
+      [undefined, "mention"],
+      "only mention searches send the mention context"
+    );
+  });
+
+  test("it searches the given url without reusing results cached for another one", async function (assert) {
+    pretender.get("/custom/search", () =>
+      response({ users: [{ username: "custom_user" }] })
+    );
+
+    let results = await userSearch({ term: "hello" });
+    assert.strictEqual(results[0].username, "TeaMoe");
+
+    results = await userSearch({ term: "hello", url: "/custom/search" });
+    assert.deepEqual(
+      results.map((r) => r.username),
+      ["custom_user"]
+    );
+  });
+
+  test("it returns cancel when eager completing with no results", async function (assert) {
+    // Do everything twice, to check the cache works correctly
+
+    for (let i = 0; i < 2; i++) {
+      // No topic or category, will always cancel
+      let result = await userSearch({ term: "" });
+      assert.strictEqual(result, CANCELLED_STATUS);
+    }
+
+    for (let i = 0; i < 2; i++) {
+      // Unsecured category, so has no recommendations
+      let result = await userSearch({ term: "", categoryId: 3 });
+      assert.strictEqual(result, CANCELLED_STATUS);
+    }
+
+    for (let i = 0; i < 2; i++) {
+      // Secured category, will have 1 recommendation
+      let results = await userSearch({ term: "", categoryId: 1 });
+      assert.strictEqual(results[0].username, "category_1");
+      assert.strictEqual(results.length, 1);
+    }
+  });
+
+  test("it strips @ from the beginning", async function (assert) {
+    const results = await userSearch({ term: "@Team" });
+
+    results.forEach((result) => {
+      const identifier = result.username || result.name;
+      assert.false(
+        identifier.startsWith("@"),
+        `Result '${identifier}' should not start with @`
+      );
+    });
+  });
+
+  test("it skips a search depending on punctuation", async function (assert) {
+    let results;
+    let skippedTerms = [
+      "@sam  s", // double space is not allowed
+      "@sam;",
+      "@sam,",
+      "@sam:",
+    ];
+
+    for (let term of skippedTerms) {
+      results = await userSearch({ term });
+      assert.strictEqual(results.length, 0);
+    }
+
+    let allowedTerms = [
+      "@sam sam", // double space is not allowed
+      "@sam.sam",
+      "@sam_sam",
+      "@sam-sam",
+      "@",
+    ];
+
+    let topicId = 100;
+
+    for (let term of allowedTerms) {
+      results = await userSearch({ term, topicId });
+      assert.strictEqual(results.length, 6);
+    }
+
+    results = await userSearch({ term: "sam@sam.com", allowEmails: true });
+    assert.strictEqual(results.length, 6);
+
+    results = await userSearch({ term: "sam+test@sam.com", allowEmails: true });
+    assert.strictEqual(results.length, 6);
+
+    results = await userSearch({ term: "sam@sam.com" });
+    assert.strictEqual(results.length, 0);
+
+    results = await userSearch({
+      term: "no-results@example.com",
+      allowEmails: true,
+    });
+    assert.strictEqual(results.length, 1);
+  });
+
+  test("it uses limit option", async function (assert) {
+    const results = await userSearch({ term: "te", limit: 2 });
+    assert.strictEqual(results.length, 2);
+  });
+
+  test("it orders results by priority: exact username, exact group, partial username, partial group, exact name, partial name, metadata", async function (assert) {
+    pretender.get("/u/search/users", (request) => {
+      if (request.url.includes("term=test")) {
+        return response({
+          users: [
+            { username: "testing", name: "Testing User" }, // partial username match
+            { username: "test", name: "Test User" }, // exact username match
+            { username: "user123", name: "anon", title: "tester" }, // metadata match
+            { username: "player", name: "test" }, // exact name match
+            { username: "gamer", name: "testing games" }, // partial name match
+          ],
+          groups: [
+            { name: "testers", usernames: [] }, // partial group match
+            { name: "test", usernames: [] }, // exact group match
+            { name: "group_2", full_name: "Testers", usernames: [] }, // partial group match
+            { name: "group_4", full_name: "Test", usernames: [] }, // exact group match
+          ],
+        });
+      }
+      return response({ users: [], groups: [] });
+    });
+
+    const results = await userSearch({
+      term: "test",
+      allowEmails: true,
+      limit: 10,
+    });
+
+    // Expected order:
+    // exact user username, exact group name,
+    // partial user username, partial group name,
+    // exact user name, partial user name
+    // exact group full_name, partial group full_name
+    assert.strictEqual(
+      results[0].username,
+      "test",
+      "First: Exact user username match"
+    );
+    assert.strictEqual(
+      results[1].name,
+      "test",
+      "Second: Exact group name match"
+    );
+    assert.strictEqual(
+      results[2].username,
+      "testing",
+      "Third: Partial user username match"
+    );
+    assert.strictEqual(
+      results[3].name,
+      "testers",
+      "Fourth: Partial group name match"
+    );
+    assert.strictEqual(
+      results[4].username,
+      "player",
+      "Fifth: Exact user name match"
+    );
+    assert.strictEqual(
+      results[5].username,
+      "gamer",
+      "Sixth: Partial user name match"
+    );
+    assert.strictEqual(
+      results[6].full_name,
+      "Test",
+      "Seventh: Exact group full name match"
+    );
+    assert.strictEqual(
+      results[7].full_name,
+      "Testers",
+      "Eighth: Partial group full name match"
+    );
+    assert.strictEqual(
+      results[8].username,
+      "user123",
+      "Ninth/Last: Metadata match"
+    );
+  });
+
+  test("it includes all matching groups when limit allows", async function (assert) {
+    pretender.get("/u/search/users", (request) => {
+      if (request.url.includes("term=dev")) {
+        return response({
+          users: [{ username: "developer", name: "Developer" }],
+          groups: [
+            { name: "devs", usernames: [] },
+            { name: "development", usernames: [] },
+            { name: "dev-team", usernames: [] },
+          ],
+        });
+      }
+      return response({ users: [], groups: [] });
+    });
+
+    const results = await userSearch({ term: "dev", limit: 10 });
+    const groupNames = results.groups.map((g) => g.name);
+
+    // All groups should be included since limit allows
+    ["devs", "development", "dev-team"].forEach((groupName) => {
+      assert.true(
+        groupNames.includes(groupName),
+        `Should include '${groupName}' group`
+      );
+    });
+  });
+
+  test("it stops searching while the advertised rate limit wait is running", async function (assert) {
+    let requestCount = 0;
+    pretender.get("/u/search/users", () => {
+      requestCount++;
+      return middlewareRateLimit(60);
+    });
+
+    let result = await userSearch({ term: "ratelimited" });
+    assert.strictEqual(
+      result,
+      CANCELLED_STATUS,
+      "the rejection is handled instead of bubbling up"
+    );
+
+    result = await userSearch({ term: "ratelimitedtoo" });
+    assert.strictEqual(result, CANCELLED_STATUS);
+    assert.strictEqual(
+      requestCount,
+      1,
+      "no further request is sent before the wait is over"
+    );
+  });
+
+  test("it protects cached results from mutation by consumers", async function (assert) {
+    pretender.get("/u/search/users", (request) => {
+      if (request.url.includes("term=test_cache")) {
+        return response({
+          users: [
+            {
+              id: 123,
+              username: "test_cache_user",
+              name: "Test Cache User",
+              avatar_template:
+                "https://avatars.discourse.org/v3/letter/t/41988e/{size}.png",
+            },
+          ],
+          groups: [],
+        });
+      }
+      return response({ users: [], groups: [] });
+    });
+
+    // First userSearch call - this will populate the cache
+    let firstResults = await userSearch({ term: "test_cache" });
+    assert.strictEqual(
+      firstResults.length,
+      1,
+      "First call should return 1 result"
+    );
+
+    const userFromFirstCall = firstResults[0];
+    assert.strictEqual(
+      userFromFirstCall.username,
+      "test_cache_user",
+      "First call should have username"
+    );
+    assert.strictEqual(
+      userFromFirstCall.name,
+      "Test Cache User",
+      "First call should have name"
+    );
+    assert.present(
+      userFromFirstCall.avatar_template,
+      "First call should have avatar_template"
+    );
+
+    const originalKeys = Object.keys(userFromFirstCall);
+    // Simulate what can happen in consumers of the cache result that mutate that object
+    Object.keys(userFromFirstCall).forEach((key) => {
+      if (key === "id") {
+        return;
+      }
+      delete userFromFirstCall[key];
+    });
+
+    // Verify the mutation happened
+    assert.present(userFromFirstCall.id, "User object should still have id");
+    assert.strictEqual(
+      Object.keys(userFromFirstCall).length,
+      1,
+      "User object should be mutated to only have id"
+    );
+    ["username", "name", "avatar_template"].forEach((key) => {
+      assert.blank(
+        userFromFirstCall[key],
+        `User object should not have ${key} after mutation`
+      );
+    });
+
+    // Second userSearch call - this should return fresh objects from cache that are not mutated
+    let secondResults = await userSearch({ term: "test_cache" });
+    assert.strictEqual(
+      secondResults.length,
+      1,
+      "Second call should return 1 result"
+    );
+
+    const userFromSecondCall = secondResults[0];
+    assert.strictEqual(
+      userFromSecondCall.username,
+      "test_cache_user",
+      "Second call should have username (cache should be protected from mutation)"
+    );
+    assert.strictEqual(
+      userFromSecondCall.name,
+      "Test Cache User",
+      "Second call should have name (cache should be protected from mutation)"
+    );
+    assert.present(
+      userFromSecondCall.avatar_template,
+      "Second call should have avatar_template (cache should be protected from mutation)"
+    );
+    assert.strictEqual(
+      Object.keys(userFromSecondCall).length,
+      originalKeys.length,
+      "Second call should have all original properties"
+    );
+  });
+});

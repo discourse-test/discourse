@@ -1,0 +1,15 @@
+import AiToolEditor from "discourse/plugins/discourse-ai/discourse/components/ai-tool-editor";
+
+export default <template>
+  <section class="ai-agent-tool-editor__current admin-detail pull-left">
+    <AiToolEditor
+      @llms={{@controller.llms}}
+      @model={{@controller.model}}
+      @presets={{@controller.presets}}
+      @secrets={{@controller.secrets}}
+      @selectedPreset={{@controller.selectedPreset}}
+      @settings={{@controller.settings}}
+      @tools={{@controller.allTools}}
+    />
+  </section>
+</template>

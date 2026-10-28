@@ -1,0 +1,54 @@
+import Component from "@glimmer/component";
+import { concat, hash } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import getURL from "discourse/lib/get-url";
+import dBoundAvatarTemplate from "discourse/ui-kit/helpers/d-bound-avatar-template";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+
+export default class Participant extends Component {
+  @service appEvents;
+
+  get url() {
+    return this.args.type === "user"
+      ? this.args.user.path
+      : getURL(`/g/${this.args.username}`);
+  }
+
+  @action
+  click(e) {
+    this.appEvents.trigger(
+      `topic-header:trigger-${this.args.type}-card`,
+      this.args.username,
+      e.target,
+      e
+    );
+    e.preventDefault();
+  }
+
+  <template>
+    <span class={{concat "trigger-" @type "-card"}}>
+      <a
+        class="icon"
+        data-auto-route="true"
+        href={{this.url}}
+        title={{@username}}
+        {{on "click" this.click}}
+      >
+        {{#if (eq @type "user")}}
+          {{dBoundAvatarTemplate
+            @user.avatar_template
+            (or @avatarSize "tiny")
+            (hash title=@username)
+          }}
+        {{else}}
+          <span>
+            {{dIcon "users"}}
+            {{@username}}
+          </span>
+        {{/if}}
+      </a>
+    </span>
+  </template>
+}

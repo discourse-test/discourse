@@ -1,0 +1,12 @@
+const ReviewableField = <template>
+  <div ...attributes>
+    {{#if @value}}
+      <div class={{@classes}}>
+        <div class="name">{{@name}}</div>
+        <div class="value">{{@value}}</div>
+      </div>
+    {{/if}}
+  </div>
+</template>;
+
+export default ReviewableField;

@@ -1,0 +1,42 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+zh_CN:
+  site_settings:
+    enable_discourse_github_plugin: "启用 discourse-github 插件"
+    github_linkback_enabled: "将 GitHub 议题链接回论坛讨论"
+    github_linkback_projects: "待链接回的项目列表"
+    github_linkback_access_token: '一个有效访问令牌，用于将发布反向链接的用户以及计算提交/贡献以授予徽章。有关如何获取令牌的说明，请参阅<a href="https://meta.discourse.org/t/99895">此处</a>。'
+    github_linkback_maximum_links: "从单个帖子创建的最大反向链接数。当帖子包含更多链接时，将不会创建任何链接。"
+    github_permalinks_enabled: "启用 GitHub 永久链接覆盖"
+    github_pr_status_enabled: "在 onebox 中显示 Github 拉取请求状态（草稿、开放、已批准、已合并、已关闭）"
+    github_webhook_secret: "用于 Github 网络钩子签名验证的密钥令牌。在您的 Github 网络钩子设置中配置。"
+    github_permalinks_exclude: "应从永久链接覆盖中排除的文件名或目录。仅提供文件名或完整路径：user/repository/optional-directory/filename"
+    github_badges_enabled: "启用 GitHub 徽章"
+    github_badges_repos: "用于扫描贡献和提交的 GitHub 仓库的 URL"
+    github_silver_badge_min_commits: "白银徽章的最低提交次数"
+    github_gold_badge_min_commits: "黄金徽章的最低提交次数"
+    errors:
+      invalid_badge_repo: "您必须提供 GitHub URL 或格式为 github_user/repository_name 的仓库名称"
+      invalid_badge_repo_value: "'%{repo}' 不是有效的 GitHub URL 或仓库名称。请使用 github_user/repository_name 格式。"
+  github_linkback:
+    commit_template: |
+      此提交已在 **%{title}** 上被提及。那里可能有相关详细信息：
+
+      %{post_url}
+    pr_template: |
+      此拉取请求已在 **%{title}** 上被提及。那里可能有相关详细信息：
+
+      %{post_url}
+    issue_template: |
+      此问题已在 **%{title}** 上被提及。那里可能有相关详细信息：
+
+      %{post_url}
+  dashboard:
+    problem:
+      github_linkback_access_token_invalid: "GitHub 拒绝了 {{setting:github_linkback_access_token}}。请生成新的令牌并更新设置。"
+      github_badges_repo_not_found: "GitHub 仓库 <code>%{repo}</code> 在 {{setting:github_badges_repos}} 中不存在，或者 {{setting:github_linkback_access_token}} 无法访问它，因此它的贡献不计入徽章。"
+      github_badges_repo_moved: "GitHub 仓库 <code>%{repo}</code> 已迁移至 <code>%{new_name}</code>。请更新 {{setting:github_badges_repos}} 以使用新名称。"

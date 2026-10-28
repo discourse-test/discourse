@@ -1,0 +1,28 @@
+import { LinkTo } from "@ember/routing";
+import MessagesSecondaryNav from "discourse/components/user-nav/messages-secondary-nav";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import { i18n } from "discourse-i18n";
+
+export default <template>
+  <MessagesSecondaryNav>
+    <li class="tags">
+      <LinkTo @route="userPrivateMessages.tags.index">
+        {{dIcon "tag"}}
+        <span>{{i18n "user.messages.all_tags"}}</span>
+      </LinkTo>
+    </li>
+
+    {{#if @controller.tagName}}
+      <li class="archive">
+        <LinkTo
+          @model={{@controller.tagName}}
+          @route="userPrivateMessages.tags.show"
+        >
+          {{@controller.tagName}}
+        </LinkTo>
+      </li>
+    {{/if}}
+  </MessagesSecondaryNav>
+
+  {{outlet}}
+</template>

@@ -1,0 +1,31 @@
+import Component from "@glimmer/component";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import I18n, { i18n } from "discourse-i18n";
+
+export default class VerboseLocalizationButton extends Component {
+  @action
+  toggleVerboseLocalization() {
+    if (I18n.verbose) {
+      I18n.disableVerboseLocalizationSession();
+    } else {
+      I18n.enableVerboseLocalizationSession();
+    }
+    window.location.reload();
+  }
+
+  <template>
+    <button
+      class={{dConcatClass
+        "toggle-verbose-localization"
+        (if I18n.verbose "--active")
+      }}
+      title={{i18n "dev_tools.toggle_verbose_localization"}}
+      {{on "click" this.toggleVerboseLocalization}}
+    >
+      {{dIcon "scroll"}}
+    </button>
+  </template>
+}

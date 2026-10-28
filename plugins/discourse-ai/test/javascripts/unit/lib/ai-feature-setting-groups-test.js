@@ -1,0 +1,167 @@
+import { module, test } from "qunit";
+import { getSettingGroupsForFeature } from "discourse/plugins/discourse-ai/discourse/lib/ai-feature-setting-groups";
+
+module("Unit | Lib | ai-feature-setting-groups", function () {
+  test("returns correct groups for ai_helper", function (assert) {
+    const groups = getSettingGroupsForFeature("ai_helper");
+
+    assert.strictEqual(groups.length, 4, "ai_helper should have 4 groups");
+    assert.strictEqual(
+      groups[0].key,
+      "access_permissions",
+      "first group should be access_permissions"
+    );
+
+    assert.true(
+      groups[0].settings.includes("ai_helper_enabled"),
+      "access_permissions should include ai_helper_enabled"
+    );
+  });
+
+  test("returns correct groups for embeddings", function (assert) {
+    const groups = getSettingGroupsForFeature("embeddings");
+
+    assert.strictEqual(groups.length, 3, "embeddings should have 3 groups");
+    assert.strictEqual(
+      groups[0].key,
+      "model_settings",
+      "first group should be model_settings"
+    );
+  });
+
+  test("returns correct groups for bot", function (assert) {
+    const groups = getSettingGroupsForFeature("bot");
+
+    assert.strictEqual(groups.length, 4, "bot should have 4 groups");
+    assert.strictEqual(
+      groups[0].key,
+      "settings",
+      "first group should be settings"
+    );
+    assert.false(
+      groups.some((group) => group.settings.includes("ai_image_caption_agent")),
+      "bot should not include the image caption agent"
+    );
+  });
+
+  test("returns correct groups for image caption", function (assert) {
+    const groups = getSettingGroupsForFeature("image_caption");
+
+    assert.strictEqual(groups.length, 1, "image caption should have 1 group");
+    assert.strictEqual(
+      groups[0].key,
+      "settings",
+      "first group should be settings"
+    );
+    assert.deepEqual(groups[0].settings, [
+      "ai_post_image_captions_enabled",
+      "ai_image_caption_agent",
+      "ai_post_image_captions_per_post_limit",
+      "ai_post_image_captions_backfill_hourly_rate",
+      "ai_post_image_captions_backfill_max_age_days",
+    ]);
+  });
+
+  test("returns correct groups for summarization", function (assert) {
+    const groups = getSettingGroupsForFeature("summarization");
+
+    assert.strictEqual(groups.length, 3, "summarization should have 3 groups");
+    assert.true(
+      groups[0].settings.includes("ai_summaries_for_crawlers"),
+      "basic settings should include summary publication"
+    );
+  });
+
+  test("returns correct groups for search", function (assert) {
+    const groups = getSettingGroupsForFeature("search");
+
+    assert.deepEqual(
+      groups.map((group) => group.key),
+      ["settings", "agents", "access_control", "ask_ai_reports"]
+    );
+    assert.deepEqual(groups[0].settings, [
+      "ai_discover_enabled",
+      "ai_ask_ai_enabled",
+      "ai_ask_ai_summary_detail",
+      "ai_ask_ai_related_count",
+    ]);
+    assert.deepEqual(groups[1].settings, [
+      "ai_discover_agent",
+      "ai_ask_ai_agent",
+      "ai_ask_ai_query_rewriter_agent",
+      "ai_ask_ai_report_agent",
+      "ai_ask_ai_follow_up_agent",
+    ]);
+    assert.deepEqual(groups[2].settings, ["ai_ask_ai_allowed_groups"]);
+    assert.deepEqual(groups[3].settings, [
+      "ai_ask_ai_report_weekly_enabled",
+      "ai_ask_ai_report_exclude_groups",
+      "ai_ask_ai_report_max_asks",
+      "ai_ask_ai_report_recipient_groups",
+    ]);
+  });
+
+  test("returns correct groups for translation", function (assert) {
+    const groups = getSettingGroupsForFeature("translation");
+
+    assert.strictEqual(groups.length, 3, "translation should have 3 groups");
+    assert.true(
+      groups[2].settings.includes("ai_translation_backfill_start_date"),
+      "backfill should include the fixed start date"
+    );
+  });
+
+  test("returns correct groups for discord", function (assert) {
+    const groups = getSettingGroupsForFeature("discord");
+
+    assert.strictEqual(groups.length, 2, "discord should have 2 groups");
+  });
+
+  test("returns correct groups for inference", function (assert) {
+    const groups = getSettingGroupsForFeature("inference");
+
+    assert.strictEqual(groups.length, 4, "inference should have 4 groups");
+  });
+
+  test("returns empty array for unknown feature", function (assert) {
+    const groups = getSettingGroupsForFeature("unknown_feature");
+
+    assert.strictEqual(
+      groups.length,
+      0,
+      "unknown feature should return empty array"
+    );
+  });
+  test("sentiment groups include backend selectors and background processing", function (assert) {
+    const groups = getSettingGroupsForFeature("sentiment");
+    assert.deepEqual(
+      groups.map((group) => group.key),
+      ["sentiment", "emotion", "background_processing"],
+      "groups both independent capabilities and background controls"
+    );
+    assert.deepEqual(
+      groups.flatMap((group) => group.settings),
+      [
+        "ai_sentiment_enabled",
+        "ai_sentiment_sentiment_classification_strategy",
+        "ai_sentiment_sentiment_agent",
+        "ai_sentiment_sentiment_decision_model",
+        "ai_sentiment_emotion_enabled",
+        "ai_sentiment_emotion_classification_strategy",
+        "ai_sentiment_emotion_agent",
+        "ai_sentiment_emotion_decision_model",
+        "ai_sentiment_backfill_maximum_posts_per_hour",
+        "ai_sentiment_backfill_post_max_age_days",
+      ],
+      "exposes background controls without secret endpoint JSON"
+    );
+    assert.deepEqual(
+      groups[2].settings,
+      [
+        "ai_sentiment_backfill_maximum_posts_per_hour",
+        "ai_sentiment_backfill_post_max_age_days",
+      ],
+      "places both controls in the background processing section"
+    );
+  });
+});

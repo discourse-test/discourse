@@ -1,0 +1,280 @@
+import Component from "@glimmer/component";
+import { cached } from "@glimmer/tracking";
+import { service } from "@ember/service";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import Header from "discourse/components/topic-list/header";
+import Item from "discourse/components/topic-list/item";
+import lazyHash from "discourse/helpers/lazy-hash";
+import DAG from "discourse/lib/dag";
+import {
+  applyMutableValueTransformer,
+  applyValueTransformer,
+} from "discourse/lib/transformer";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import { i18n } from "discourse-i18n";
+import HeaderActivityCell from "./header/activity-cell.gjs";
+import HeaderBulkSelectCell from "./header/bulk-select-cell.gjs";
+import HeaderLikesCell from "./header/likes-cell.gjs";
+import HeaderOpLikesCell from "./header/op-likes-cell.gjs";
+import HeaderPostersCell from "./header/posters-cell.gjs";
+import HeaderRepliesCell from "./header/replies-cell.gjs";
+import HeaderTopicCell from "./header/topic-cell.gjs";
+import HeaderViewsCell from "./header/views-cell.gjs";
+import ItemActivityCell from "./item/activity-cell.gjs";
+import ItemBulkSelectCell from "./item/bulk-select-cell.gjs";
+import ItemLikesCell from "./item/likes-cell.gjs";
+import ItemOpLikesCell from "./item/op-likes-cell.gjs";
+import ItemPostersCell from "./item/posters-cell.gjs";
+import ItemRepliesCell from "./item/replies-cell.gjs";
+import ItemTopicCell from "./item/topic-cell.gjs";
+import ItemViewsCell from "./item/views-cell.gjs";
+
+export default class TopicList extends Component {
+  @service currentUser;
+
+  @service topicTrackingState; // accessed via `self` variable
+  @service moreTopicsTabs;
+
+  get #transformerContext() {
+    return {
+      listContext: this.args.listContext,
+      category: this.topicTrackingState.filterCategory,
+      filter: this.topicTrackingState.filter,
+    };
+  }
+
+  @cached
+  get columns() {
+    const defaultColumns = new DAG({
+      // Allow customizations to replace just a header cell or just an item cell
+      onReplaceItem(_, newValue, oldValue) {
+        newValue.header ??= oldValue.header;
+        newValue.item ??= oldValue.item;
+      },
+    });
+
+    if (this.bulkSelectEnabled) {
+      defaultColumns.add("bulk-select", {
+        header: HeaderBulkSelectCell,
+        item: ItemBulkSelectCell,
+      });
+    }
+
+    defaultColumns.add("topic", {
+      header: HeaderTopicCell,
+      item: ItemTopicCell,
+    });
+
+    if (this.args.showPosters) {
+      defaultColumns.add("posters", {
+        header: HeaderPostersCell,
+        item: ItemPostersCell,
+      });
+    }
+
+    defaultColumns.add("replies", {
+      header: HeaderRepliesCell,
+      item: ItemRepliesCell,
+    });
+
+    if (this.args.order === "likes") {
+      defaultColumns.add("likes", {
+        header: HeaderLikesCell,
+        item: ItemLikesCell,
+      });
+    } else if (this.args.order === "op_likes") {
+      defaultColumns.add("op-likes", {
+        header: HeaderOpLikesCell,
+        item: ItemOpLikesCell,
+      });
+    }
+
+    defaultColumns.add("views", {
+      header: HeaderViewsCell,
+      item: ItemViewsCell,
+    });
+
+    defaultColumns.add("activity", {
+      header: HeaderActivityCell,
+      item: ItemActivityCell,
+    });
+
+    return applyMutableValueTransformer(
+      "topic-list-columns",
+      defaultColumns,
+      this.#transformerContext
+    ).resolve();
+  }
+
+  get selected() {
+    return this.args.bulkSelectHelper?.selected;
+  }
+
+  get bulkSelectEnabled() {
+    return (
+      this.args.bulkSelectHelper?.bulkSelectEnabled && this.args.canBulkSelect
+    );
+  }
+
+  get canDoBulkActions() {
+    return this.currentUser?.canManageTopic && this.selected?.length;
+  }
+
+  get toggleInTitle() {
+    return !this.bulkSelectEnabled && this.args.canBulkSelect;
+  }
+
+  get showTopicPostBadges() {
+    return this.args.showTopicPostBadges ?? true;
+  }
+
+  get lastVisitedTopic() {
+    const { topics, order, ascending, top, hot } = this.args;
+
+    if (
+      !this.args.highlightLastVisited ||
+      top ||
+      hot ||
+      ascending ||
+      !topics ||
+      topics.length === 1 ||
+      (order && order !== "activity") ||
+      !this.currentUser?.get("previous_visit_at")
+    ) {
+      return;
+    }
+
+    // work backwards
+    // this is more efficient cause we keep appending to list
+    const start = Math.max(
+      topics.findIndex((topic) => !topic.get("pinned")),
+      0
+    );
+    let lastVisitedTopic, topic;
+
+    for (let i = topics.length - 1; i >= start; i--) {
+      if (topics[i].get("bumpedAt") > this.currentUser.get("previousVisitAt")) {
+        lastVisitedTopic = topics[i];
+        break;
+      }
+      topic = topics[i];
+    }
+
+    if (!lastVisitedTopic || !topic) {
+      return;
+    }
+
+    // end of list that was scanned
+    if (topic.get("bumpedAt") > this.currentUser.get("previousVisitAt")) {
+      return;
+    }
+
+    return lastVisitedTopic;
+  }
+
+  get additionalClasses() {
+    return applyValueTransformer("topic-list-class", [], {
+      topics: this.args.topics,
+      ...this.#transformerContext,
+    });
+  }
+
+  <template>
+    {{! eslint-disable ember/template-table-groups }}
+    <table
+      aria-labelledby={{@ariaLabelledby}}
+      class={{dConcatClass
+        "topic-list"
+        (if this.bulkSelectEnabled "sticky-header bulk-select-enabled")
+        this.additionalClasses
+      }}
+      ...attributes
+    >
+      <caption class="sr-only">{{i18n "sr_topic_list_caption"}}</caption>
+      <thead
+        class={{dConcatClass
+          "topic-list-header"
+          (if this.moreTopicsTabs.tabs.length "--has-tabs")
+        }}
+      >
+        <Header
+          @ascending={{@ascending}}
+          @bulkSelectEnabled={{this.bulkSelectEnabled}}
+          @bulkSelectHelper={{@bulkSelectHelper}}
+          @canBulkSelect={{@canBulkSelect}}
+          @canDoBulkActions={{this.canDoBulkActions}}
+          @category={{@category}}
+          @changeSort={{@changeSort}}
+          @columns={{this.columns}}
+          @hideCategory={{@hideCategory}}
+          @listTitle={{or @listTitle "topic.title"}}
+          @order={{@order}}
+          @sortable={{@changeSort}}
+          @toggleInTitle={{this.toggleInTitle}}
+        />
+      </thead>
+
+      <PluginOutlet
+        @name="before-topic-list-body"
+        @outletArgs={{lazyHash
+          topics=@topics
+          selected=this.selected
+          bulkSelectEnabled=this.bulkSelectEnabled
+          lastVisitedTopic=this.lastVisitedTopic
+          discoveryList=@discoveryList
+          hideCategory=@hideCategory
+        }}
+      />
+
+      <tbody class="topic-list-body">
+        {{#each @topics as |topic index|}}
+          <Item
+            @bulkSelectEnabled={{this.bulkSelectEnabled}}
+            @bulkSelectHelper={{@bulkSelectHelper}}
+            @category={{this.topicTrackingState.filterCategory}}
+            @columns={{this.columns}}
+            @expandAllPinned={{@expandAllPinned}}
+            @expandGloballyPinned={{@expandGloballyPinned}}
+            @focusLastVisitedTopic={{@focusLastVisitedTopic}}
+            @hideCategory={{@hideCategory}}
+            @index={{index}}
+            @lastVisitedTopic={{this.lastVisitedTopic}}
+            @listContext={{@listContext}}
+            @selected={{this.selected}}
+            @showTopicPostBadges={{this.showTopicPostBadges}}
+            @tagsForUser={{@tagsForUser}}
+            @topic={{topic}}
+          />
+
+          {{#if (eq topic this.lastVisitedTopic)}}
+            <tr class="topic-list-item-separator">
+              <td class="topic-list-data" colspan="6">
+                <span>
+                  {{i18n "topics.new_messages_marker"}}
+                </span>
+              </td>
+            </tr>
+          {{/if}}
+
+          <PluginOutlet
+            @connectorTagName="tr"
+            @name="after-topic-list-item"
+            @outletArgs={{lazyHash topic=topic index=index}}
+          />
+        {{/each}}
+      </tbody>
+
+      <PluginOutlet
+        @name="after-topic-list-body"
+        @outletArgs={{lazyHash
+          topics=@topics
+          selected=this.selected
+          bulkSelectEnabled=this.bulkSelectEnabled
+          lastVisitedTopic=this.lastVisitedTopic
+          discoveryList=@discoveryList
+          hideCategory=@hideCategory
+        }}
+      />
+    </table>
+  </template>
+}

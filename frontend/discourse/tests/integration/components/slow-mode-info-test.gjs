@@ -1,0 +1,81 @@
+import { set } from "@ember/object";
+import { render, settled } from "@ember/test-helpers";
+import { module, test } from "qunit";
+import SlowModeInfo from "discourse/components/slow-mode-info";
+import { setupRenderingTest } from "discourse/tests/helpers/component-test";
+
+module("Integration | Component | SlowModeInfo", function (hooks) {
+  setupRenderingTest(hooks);
+
+  test("doesn't render if the topic is closed", async function (assert) {
+    this.set("topic", { slow_mode_seconds: 3600, closed: true });
+
+    await render(<template><SlowModeInfo @topic={{this.topic}} /></template>);
+
+    assert.dom(".slow-mode-heading").doesNotExist("doesn't render the notice");
+  });
+
+  test("doesn't render if the slow mode is disabled", async function (assert) {
+    this.set("topic", { slow_mode_seconds: 0, closed: false });
+
+    await render(<template><SlowModeInfo @topic={{this.topic}} /></template>);
+
+    assert.dom(".slow-mode-heading").doesNotExist("doesn't render the notice");
+  });
+
+  test("renders if slow mode is enabled", async function (assert) {
+    this.set("topic", { slow_mode_seconds: 3600, closed: false });
+
+    await render(<template><SlowModeInfo @topic={{this.topic}} /></template>);
+
+    assert.dom(".slow-mode-heading").exists();
+  });
+
+  test("hides the notice once slow mode is turned off", async function (assert) {
+    const topic = { slow_mode_seconds: 3600, closed: false };
+    this.set("topic", topic);
+
+    await render(<template><SlowModeInfo @topic={{this.topic}} /></template>);
+
+    assert.dom(".slow-mode-heading").exists("renders the notice");
+
+    set(topic, "slow_mode_seconds", 0);
+    await settled();
+
+    assert
+      .dom(".slow-mode-heading")
+      .doesNotExist("drops the notice when the topic is updated");
+  });
+
+  test("staff and TL4 users can disable slow mode", async function (assert) {
+    this.setProperties({
+      topic: { slow_mode_seconds: 3600, closed: false },
+      user: { canManageTopic: true },
+    });
+
+    await render(
+      <template>
+        <SlowModeInfo @topic={{this.topic}} @user={{this.user}} />
+      </template>
+    );
+
+    assert.dom(".slow-mode-remove").exists();
+  });
+
+  test("regular users can't disable slow mode", async function (assert) {
+    this.setProperties({
+      topic: { slow_mode_seconds: 3600, closed: false },
+      user: { canManageTopic: false },
+    });
+
+    await render(
+      <template>
+        <SlowModeInfo @topic={{this.topic}} @user={{this.user}} />
+      </template>
+    );
+
+    assert
+      .dom(".slow-mode-remove")
+      .doesNotExist("doesn't let you disable slow mode");
+  });
+});

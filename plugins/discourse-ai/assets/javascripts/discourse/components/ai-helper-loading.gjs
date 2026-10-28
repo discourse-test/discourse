@@ -1,0 +1,19 @@
+import DButton from "discourse/ui-kit/d-button";
+import { i18n } from "discourse-i18n";
+
+const AiHelperLoading = <template>
+  <div class="ai-helper-loading">
+    <div class="dot-falling"></div>
+    <span>
+      {{i18n "discourse_ai.ai_helper.context_menu.loading"}}
+    </span>
+    <DButton
+      class="btn-flat cancel-request"
+      @action={{@cancel}}
+      @icon="xmark"
+      @title="discourse_ai.ai_helper.context_menu.cancel"
+    />
+  </div>
+</template>;
+
+export default AiHelperLoading;

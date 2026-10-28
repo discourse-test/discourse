@@ -1,0 +1,47 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+ro:
+  js:
+    data_explorer:
+      admin_dashboard_card:
+        no_results: "Fără rezultate"
+      manage_reports_hint:
+        title: "Creează o interogare pentru Exploratorul de date"
+        description: "Scrie o interogare SQL personalizată pentru a scoate la iveală orice aspect specific comunității tale."
+    explorer:
+      or: "sau"
+      ai:
+        generate: "Generare"
+      help:
+        label: "Ajutor"
+      schema:
+        filter: "Caută..."
+      types:
+        bool:
+          yes: "Da"
+          no: "Nu"
+      save: "Salvează modificări"
+      undo: "Renunță la modificări"
+      delete: "Șterge"
+      name: "Nume"
+      query_groups: "Grupuri"
+      query_tags: "Etichete"
+      report_name: "Raport"
+      query_description: "Descriere"
+      query_time: "Ultima rulare"
+      query_user: "Creată de"
+      reset_params: "Resetare"
+    group:
+      reports: "Rapoarte"
+    discourse_workflows:
+      nodes:
+        "action:sql": "Explorator de date"
+      sql:
+        param_value: "Valoare"
+        output:
+          results: "Rezultate"
+          no_results: "Fără rezultate"

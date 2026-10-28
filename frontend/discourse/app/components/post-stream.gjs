@@ -1,0 +1,478 @@
+import Component from "@glimmer/component";
+import { cached, tracked } from "@glimmer/tracking";
+import { concat, fn, get, hash } from "@ember/helper";
+import { action } from "@ember/object";
+import { next, schedule } from "@ember/runloop";
+import { service } from "@ember/service";
+import { modifier } from "ember-modifier";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import PostFilteredNotice from "discourse/components/post/filtered-notice";
+import lazyHash from "discourse/helpers/lazy-hash";
+import { bind } from "discourse/lib/decorators";
+import { Placeholder } from "discourse/models/post-stream";
+import PostStreamViewportTracker from "discourse/modifiers/post-stream-viewport-tracker";
+import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import Post from "./post.gjs";
+import PostGap from "./post/gap.gjs";
+import PostLoadMoreAccessible from "./post/load-more-accessible.gjs";
+import PostPlaceholder from "./post/placeholder.gjs";
+import PostSmallAction from "./post/small-action.gjs";
+import PostTimeGap from "./post/time-gap.gjs";
+import PostVisitedLine from "./post/visited-line.gjs";
+
+const DAY_MS = 1000 * 60 * 60 * 24;
+
+export default class PostStream extends Component {
+  @service appEvents;
+  @service capabilities;
+  @service header;
+  @service screenTrack;
+  @service search;
+  @service siteSettings;
+
+  @tracked cloakAbove;
+  @tracked cloakBelow;
+  @tracked keyboardSelection;
+  @tracked suppressLoadAbove = false;
+
+  viewportTracker = new PostStreamViewportTracker();
+
+  /**
+   * Focuses the post requested via `PostStream#focusPostOnRender` once its
+   * content exists, which may be several renders after the request.
+   */
+  focusWhenRendered = modifier((element, [postNumber, cloaked, target]) => {
+    if (cloaked || target?.done || target?.postNumber !== postNumber) {
+      return;
+    }
+
+    const body = element.querySelector(".topic-body, .small-action-desc");
+    if (!body) {
+      return;
+    }
+
+    target.done = true;
+    body.setAttribute("tabindex", "0");
+    // jumpToPost owns scrolling; letting focus scroll too makes the page jump
+    body.focus({ preventScroll: true });
+  });
+
+  quoteHighlightFor = (post) =>
+    this.args.postStream.quoteHighlights.get(post.post_number);
+
+  constructor() {
+    super(...arguments);
+
+    this.#setupEventListeners();
+  }
+
+  willDestroy() {
+    super.willDestroy(...arguments);
+
+    // clear event listeners
+    this.#setupEventListeners(false);
+    // clear pending references in the observer
+    this.viewportTracker.destroy();
+  }
+
+  get gapsBefore() {
+    return this.args.gaps?.before || {};
+  }
+
+  get gapsAfter() {
+    return this.args.gaps?.after || {};
+  }
+
+  @cached
+  get posts() {
+    return this.capabilities.isAndroid
+      ? this.args.postStream.posts
+      : this.args.postStream.postsWithPlaceholders;
+  }
+
+  get firstAvailablePost() {
+    return this.posts[0];
+  }
+
+  get highlightTerm() {
+    return this.search.highlightTerm;
+  }
+
+  get lastAvailablePost() {
+    return this.posts.at(-1);
+  }
+
+  @cached
+  get existingPostNumbers() {
+    return this.posts
+      .filter((post) => !this.isPlaceholder(post))
+      .map((post) => post.post_number)
+      .filter((num) => !isNaN(num));
+  }
+
+  get shouldShowFilteredNotice() {
+    return (
+      this.args.streamFilters &&
+      Object.keys(this.args.streamFilters).length &&
+      (Object.keys(this.gapsBefore).length > 0 ||
+        Object.keys(this.gapsAfter).length > 0)
+    );
+  }
+
+  // Indexed rather than wrapped: a per-render wrapper is a new value each
+  // recompute, invalidating `@post` and rebuilding unchanged cooked HTML.
+  @bind
+  previousPost(index) {
+    return this.posts[index - 1] ?? null;
+  }
+
+  @bind
+  nextPost(index) {
+    return this.posts[index + 1] ?? null;
+  }
+
+  isPlaceholder(post) {
+    return post instanceof Placeholder;
+  }
+
+  @bind
+  isPostKeyboardSelected(postNumber) {
+    return (
+      this.keyboardSelection &&
+      this.keyboardSelection.topicId === this.args.topic.id &&
+      this.keyboardSelection.postNumber === postNumber
+    );
+  }
+
+  daysBetween(post1, post2) {
+    const time1 = post1 ? new Date(post1.created_at).getTime() : null;
+    const time2 = post2 ? new Date(post2.created_at).getTime() : null;
+
+    if (!time1 || !time2) {
+      return null;
+    }
+
+    return Math.floor((time2 - time1) / DAY_MS);
+  }
+
+  @bind
+  shouldShowTimeGap(daysSince) {
+    return daysSince > this.siteSettings.show_time_gap_days;
+  }
+
+  @bind
+  shouldShowVisitedLine(post, arrayIndex) {
+    const postsLength = this.posts.length;
+    const maxPostNumber = postsLength > 0 ? this.posts.at(-1).post_number : 0;
+
+    return (
+      arrayIndex !== postsLength - 1 && // do not show on the last post displayed
+      maxPostNumber <= this.args.highestPostNumber && // do not show in the last existing post
+      this.args.lastReadPostNumber === post.post_number
+    );
+  }
+
+  @action
+  loadMoreAbove(post) {
+    const anchorElement =
+      this.viewportTracker.postsOnScreen[post.post_number]?.element;
+
+    // anchorTop is captured by the captureAnchor callback, which is called
+    // inside prependMore after the fetch completes (when the loading spinner is
+    // visible) but before new posts are inserted into the DOM.
+    let anchorTop;
+
+    this.args.topVisibleChanged({
+      post,
+      captureAnchor: () => {
+        anchorTop = anchorElement?.getBoundingClientRect().top;
+        // Suppress the load-more sentinel until the scroll compensation completes.
+        // Without this, the sentinel could re-appear between loadingAbove=false
+        // (spinner removed) and scrollBy (position compensated), triggering
+        // another load before the user's viewport is restored.
+        if (anchorTop != null) {
+          this.suppressLoadAbove = true;
+        }
+      },
+      refresh: () => {
+        if (anchorTop == null) {
+          return;
+        }
+
+        // Chrome and Firefox natively support scroll anchoring (overflow-anchor)
+        // which should keep the viewport stable when posts are prepended above.
+        // From the major Browsers, currently only Safari won't support it.
+        // We compensate manually as a fallback — the code is browser-agnostic
+        // because themes or plugins can inadvertently break native anchoring by
+        // styling elements in the post-stream, and the shift check ensures this
+        // is a no-op when anchoring works correctly.
+        const shift = anchorElement.getBoundingClientRect().top - anchorTop;
+        if (shift !== 0) {
+          window.scrollBy(0, shift);
+        }
+
+        // The primary scrollBy above compensates for newly prepended posts,
+        // but `prependMore` also sets `loadingAbove = false` which removes
+        // the loading spinner. Since Ember renders that change asynchronously,
+        // the spinner is still in the DOM during the primary compensation.
+        // Once Ember removes it in the next render pass, the layout shifts
+        // again. This afterRender pass catches that secondary shift.
+        schedule("afterRender", () => {
+          const renderShift =
+            anchorElement.getBoundingClientRect().top - anchorTop;
+          if (renderShift !== 0) {
+            window.scrollBy(0, renderShift);
+          }
+          // Defer re-enabling the load-more sentinel to the next run loop
+          // turn so that all pending renders (new posts, spinner removal)
+          // have fully settled in the DOM before the sentinel can retrigger.
+          next(() => {
+            this.suppressLoadAbove = false;
+          });
+        });
+      },
+    });
+  }
+
+  @action
+  loadMoreBelow(post) {
+    this.args.bottomVisibleChanged({ post });
+  }
+
+  @action
+  setCloakingBoundaries(above, below) {
+    // requesting an animation frame to update the cloaking boundaries prevents Chrome from logging
+    // [Violation] 'setTimeout' handler took <N>ms when scrolling fast
+    requestAnimationFrame(() => {
+      if (this.cloakAbove === above && this.cloakBelow === below) {
+        // prevent Ember from trying to rerender the cloaking logic if the boundaries did not change
+        return;
+      }
+
+      this.cloakAbove = above;
+      this.cloakBelow = below;
+    });
+  }
+
+  @action
+  updateKeyboardSelectedPostNumber({ selectedArticle: element }) {
+    next(() => {
+      const postNumber = parseInt(element.dataset.postNumber, 10);
+      this.keyboardSelection = {
+        topicId: this.args.topic.id,
+        postNumber,
+      };
+
+      // When keyboard navigation reaches a boundary post, trigger loading
+      // more posts in that direction. Double-loading is prevented by the
+      // existing canPrependMore/canAppendMore guards in the model.
+      if (
+        this.firstAvailablePost?.post_number === postNumber &&
+        this.args.postStream.canPrependMore
+      ) {
+        this.loadMoreAbove(this.firstAvailablePost);
+      } else if (
+        this.lastAvailablePost?.post_number === postNumber &&
+        this.args.postStream.canAppendMore
+      ) {
+        this.loadMoreBelow(this.lastAvailablePost);
+      }
+    });
+  }
+
+  #setupEventListeners(addListeners = true) {
+    if (!addListeners) {
+      this.appEvents.off(
+        "keyboard:move-selection",
+        this,
+        this.updateKeyboardSelectedPostNumber
+      );
+
+      return;
+    }
+
+    this.appEvents.on(
+      "keyboard:move-selection",
+      this,
+      this.updateKeyboardSelectedPostNumber
+    );
+  }
+
+  <template>
+    <DConditionalLoadingSpinner @condition={{@postStream.loadingAbove}} />
+    <div
+      class="post-stream"
+      {{this.viewportTracker.setup
+        currentPostChanged=@currentPostChanged
+        currentPostScrolled=@currentPostScrolled
+        headerOffset=this.header.headerOffset
+        screenTrack=this.screenTrack
+        setCloakingBoundaries=this.setCloakingBoundaries
+        topicId=@topic.id
+      }}
+    >
+      {{#if @postStream.canPrependMore}}
+        <PostLoadMoreAccessible
+          @action={{fn this.loadMoreAbove this.firstAvailablePost}}
+          @canLoadMore={{@postStream.canPrependMore}}
+          @direction="above"
+          @enabled={{and
+            (not @postStream.loadingAbove)
+            (not this.suppressLoadAbove)
+          }}
+          @existingPostNumbers={{this.existingPostNumbers}}
+          @firstAvailablePost={{this.firstAvailablePost}}
+          @lastAvailablePost={{this.lastAvailablePost}}
+          @postStream={{@postStream}}
+        />
+      {{/if}}
+
+      {{#each this.posts key="id" as |post index|}}
+        {{#let
+          (this.previousPost index) (this.nextPost index)
+          as |previousPost nextPost|
+        }}
+          {{#if (this.isPlaceholder post)}}
+            <PostPlaceholder />
+          {{else}}
+            {{#let (get this.gapsBefore post.id) as |gap|}}
+              {{#if gap}}
+                <PostGap
+                  @fillGap={{fn @fillGapBefore (hash post=post gap=gap)}}
+                  @gap={{gap}}
+                  @post={{post}}
+                />
+              {{/if}}
+            {{/let}}
+
+            {{#let (this.daysBetween previousPost post) as |daysSince|}}
+              {{#if (this.shouldShowTimeGap daysSince)}}
+                <PostTimeGap @daysSince={{daysSince}} />
+              {{/if}}
+            {{/let}}
+
+            {{#let
+              (if post.isSmallAction PostSmallAction Post)
+              (this.viewportTracker.getCloakingData
+                post above=this.cloakAbove below=this.cloakBelow
+              )
+              (this.isPostKeyboardSelected post.post_number)
+              (concat "post_" post.post_number)
+              as |PostComponent cloakingData keyboardSelected postId|
+            }}
+              {{! eslint-disable ember/template-no-duplicate-id }}
+              <PostComponent
+                class={{dConcatClass
+                  (if cloakingData.active "post-stream--cloaked")
+                  (if keyboardSelected "selected")
+                }}
+                id={{postId}}
+                style={{cloakingData.style}}
+                @cancelFilter={{fn @cancelFilter post}}
+                @canCreatePost={{@canCreatePost}}
+                @changeNotice={{fn @changeNotice post}}
+                @changePostOwner={{fn @changePostOwner post}}
+                @cloaked={{cloakingData.active}}
+                @deletePost={{fn @deletePost post}}
+                @editPost={{fn @editPost post}}
+                @elementId={{postId}}
+                @expandHidden={{fn @expandHidden post}}
+                @filteringRepliesToPostNumber={{@filteringRepliesToPostNumber}}
+                @grantBadge={{fn @grantBadge post}}
+                @highlightTerm={{this.highlightTerm}}
+                @keyboardSelected={{keyboardSelected}}
+                @lockPost={{fn @lockPost post}}
+                @multiSelect={{@multiSelect}}
+                @nextPost={{nextPost}}
+                @permanentlyDeletePost={{fn @permanentlyDeletePost post}}
+                @post={{post}}
+                @prevPost={{previousPost}}
+                @quoteHighlight={{this.quoteHighlightFor post}}
+                @rebakePost={{fn @rebakePost post}}
+                @recoverPost={{fn @recoverPost post}}
+                @removeAllowedGroup={{@removeAllowedGroup}}
+                @removeAllowedUser={{@removeAllowedUser}}
+                @replyToPost={{fn @replyToPost post}}
+                @selectBelow={{fn @selectBelow post}}
+                @selected={{if @multiSelect (@postSelected post)}}
+                @selectReplies={{fn @selectReplies post}}
+                @showFlags={{fn @showFlags post}}
+                @showHistory={{fn @showHistory post}}
+                @showInvite={{fn @showInvite post}}
+                @showLogin={{fn @showLogin post}}
+                @showPagePublish={{fn @showPagePublish post}}
+                @showRawEmail={{fn @showRawEmail post}}
+                @showReadIndicator={{@showReadIndicator}}
+                @streamElement={{true}}
+                @togglePostSelection={{fn @togglePostSelection post}}
+                @togglePostType={{fn @togglePostType post}}
+                @toggleReplyAbove={{fn @toggleReplyAbove post}}
+                @toggleWiki={{fn @toggleWiki post}}
+                @topicPageQueryParams={{@topicPageQueryParams}}
+                @unhidePost={{fn @unhidePost post}}
+                @unlockPost={{fn @unlockPost post}}
+                @updateTopicPageQueryParams={{@updateTopicPageQueryParams}}
+                {{this.viewportTracker.registerPost post}}
+                {{this.focusWhenRendered
+                  post.post_number
+                  cloakingData.active
+                  @postStream.focusTarget
+                }}
+              />
+            {{/let}}
+
+            {{#let (get this.gapsAfter post.id) as |gap|}}
+              {{#if gap}}
+                <PostGap
+                  @fillGap={{fn @fillGapAfter (hash post=post gap=gap)}}
+                  @gap={{gap}}
+                  @post={{post}}
+                />
+              {{/if}}
+            {{/let}}
+
+            {{#if (this.shouldShowVisitedLine post index)}}
+              <PostVisitedLine @post={{post}} />
+            {{/if}}
+          {{/if}}
+        {{/let}}
+      {{/each}}
+
+      {{#if @postStream.canAppendMore}}
+        <PostLoadMoreAccessible
+          @action={{fn this.loadMoreBelow this.lastAvailablePost}}
+          @canLoadMore={{@postStream.canAppendMore}}
+          @direction="below"
+          @enabled={{not @postStream.loadingBelow}}
+          @existingPostNumbers={{this.existingPostNumbers}}
+          @firstAvailablePost={{this.firstAvailablePost}}
+          @lastAvailablePost={{this.lastAvailablePost}}
+          @postStream={{@postStream}}
+        />
+      {{else if (not @postStream.loadingBelow)}}
+        <div
+          class="post-stream__bottom-boundary"
+          {{this.viewportTracker.registerBottomBoundary topicId=@topic.id}}
+        ></div>
+        {{! this plugin outlet is only inserted when the real bottom of the post-stream is rendered
+           this is useful for plugins that want to render something at the bottom of the post-stream
+           e.g. a "no more posts" message }}
+        <PluginOutlet
+          @name="post-stream-bottom"
+          @outletArgs={{lazyHash posts=this.posts topic=@topic}}
+        />
+      {{/if}}
+
+      {{#if this.shouldShowFilteredNotice}}
+        <PostFilteredNotice
+          @cancelFilter={{@cancelFilter}}
+          @filteredPostsCount={{@filteredPostsCount}}
+          @posts={{this.posts}}
+          @streamFilters={{@streamFilters}}
+        />
+      {{/if}}
+    </div>
+    <DConditionalLoadingSpinner @condition={{@postStream.loadingBelow}} />
+  </template>
+}

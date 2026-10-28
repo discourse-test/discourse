@@ -1,0 +1,790 @@
+import {
+  click,
+  currentURL,
+  find,
+  triggerEvent,
+  triggerKeyEvent,
+  visit,
+} from "@ember/test-helpers";
+import { test } from "qunit";
+import sinon from "sinon";
+import { acceptance } from "discourse/tests/helpers/qunit-helpers";
+import selectKit from "discourse/tests/helpers/select-kit-helper";
+import {
+  settleGestureFrame,
+  stubPointerCapture,
+} from "discourse/tests/helpers/ui-kit/pointer-gesture-helper";
+import { i18n } from "discourse-i18n";
+
+function stubPluginDetails(server, helper) {
+  server.get("/admin/plugins/discourse-data-explorer.json", () =>
+    helper.response({
+      id: "discourse-data-explorer",
+      name: "discourse-data-explorer",
+      enabled: true,
+      has_settings: true,
+      humanized_name: "Data Explorer",
+      is_discourse_owned: true,
+      admin_route: {
+        label: "explorer.title",
+        location: "discourse-data-explorer",
+        use_new_show_route: true,
+      },
+    })
+  );
+}
+
+acceptance("Run Query", function (needs) {
+  needs.user();
+  needs.settings({ data_explorer_enabled: true });
+
+  let updateParams;
+  let query2Tags;
+  let query2Deletes;
+
+  needs.hooks.beforeEach(() => {
+    sinon.stub(window, "open");
+    updateParams = null;
+    query2Tags = ["custom", "existing"];
+    query2Deletes = 0;
+  });
+
+  needs.hooks.afterEach(() => {
+    window.open.restore();
+  });
+
+  needs.pretender((server, helper) => {
+    stubPluginDetails(server, helper);
+
+    server.get("/admin/plugins/discourse-data-explorer/groups.json", () => {
+      return helper.response([
+        {
+          id: 1,
+          name: "admins",
+        },
+        {
+          id: 2,
+          name: "moderators",
+        },
+        {
+          id: 3,
+          name: "staff",
+        },
+        {
+          id: 0,
+          name: "everyone",
+        },
+        {
+          id: 10,
+          name: "trust_level_0",
+        },
+        {
+          id: 11,
+          name: "trust_level_1",
+        },
+        {
+          id: 12,
+          name: "trust_level_2",
+        },
+        {
+          id: 13,
+          name: "trust_level_3",
+        },
+        {
+          id: 14,
+          name: "trust_level_4",
+        },
+      ]);
+    });
+
+    server.get("/admin/plugins/discourse-data-explorer/schema.json", () => {
+      return helper.response({
+        anonymous_users: [
+          {
+            column_name: "id",
+            data_type: "serial",
+            primary: true,
+          },
+          {
+            column_name: "user_id",
+            data_type: "integer",
+            fkey_info: "users",
+          },
+          {
+            column_name: "master_user_id",
+            data_type: "integer",
+            fkey_info: "users",
+          },
+          {
+            column_name: "active",
+            data_type: "boolean",
+          },
+          {
+            column_name: "created_at",
+            data_type: "timestamp",
+          },
+          {
+            column_name: "updated_at",
+            data_type: "timestamp",
+          },
+        ],
+      });
+    });
+
+    server.get("/admin/plugins/discourse-data-explorer/queries/tags.json", () =>
+      helper.response(["default", "existing"])
+    );
+
+    server.get("/api/data-explorer/queries", () => {
+      return helper.response({ data: [] });
+    });
+
+    server.get("/admin/plugins/discourse-data-explorer/queries/-6", () => {
+      return helper.response({
+        query: {
+          id: -6,
+          sql: "-- [params]\n-- int :months_ago = 1\n\nWITH query_period AS (\n    SELECT\n        date_trunc('month', CURRENT_DATE) - INTERVAL ':months_ago months' as period_start,\n        date_trunc('month', CURRENT_DATE) - INTERVAL ':months_ago months' + INTERVAL '1 month' - INTERVAL '1 second' as period_end\n        )\n\n    SELECT\n        ua.user_id,\n        count(1) AS like_count\n    FROM user_actions ua\n    INNER JOIN query_period qp\n    ON ua.created_at >= qp.period_start\n    AND ua.created_at <= qp.period_end\n    WHERE ua.action_type = 1\n    GROUP BY ua.user_id\n    ORDER BY like_count DESC\n    LIMIT 100\n",
+          name: "Top 100 Likers",
+          description:
+            "returns the top 100 likers for a given monthly period ordered by like_count. It accepts a ‘months_ago’ parameter, defaults to 1 to give results for the last calendar month.",
+          param_info: [
+            {
+              identifier: "months_ago",
+              type: "int",
+              default: "1",
+              nullable: false,
+            },
+          ],
+          created_at: "2021-02-02T12:21:11.449Z",
+          username: "system",
+          group_ids: [],
+          tags: ["default", "existing"],
+          automatic_tags: ["default"],
+          last_run_at: "2021-02-11T08:29:59.337Z",
+          hidden: false,
+          user_id: -1,
+          is_default: true,
+        },
+      });
+    });
+
+    server.get("/admin/plugins/discourse-data-explorer/queries/2", () => {
+      return helper.response({
+        query: {
+          id: 2,
+          sql: 'SELECT 0 zero, null "null", false "false"',
+          name: "What about 0?",
+          description: "",
+          param_info: [],
+          created_at: "2023-05-04T22:16:06.007Z",
+          username: "system",
+          group_ids: [],
+          tags: query2Tags,
+          automatic_tags: ["custom"],
+          last_run_at: "2023-05-04T22:16:23.858Z",
+          hidden: false,
+          user_id: 1,
+        },
+      });
+    });
+
+    server.post("/admin/plugins/discourse-data-explorer/queries/-6/run", () => {
+      return helper.response({
+        success: true,
+        errors: [],
+        duration: 27.5,
+        result_count: 2,
+        params: { months_ago: "1" },
+        columns: ["user_id", "like_count"],
+        default_limit: 1000,
+        relations: {
+          user: [
+            {
+              id: -2,
+              username: "discobot",
+              name: null,
+              avatar_template: "/user_avatar/localhost/discobot/{size}/2_2.png",
+            },
+            {
+              id: 2,
+              username: "andrey1",
+              name: null,
+              avatar_template:
+                "/letter_avatar_proxy/v4/letter/a/c0e974/{size}.png",
+            },
+          ],
+        },
+        colrender: {
+          0: "user",
+        },
+        rows: [
+          [-2, 2],
+          [2, 2],
+        ],
+      });
+    });
+
+    server.post("/admin/plugins/discourse-data-explorer/queries/2/run", () => {
+      return helper.response({
+        success: true,
+        errors: [],
+        duration: 1.0,
+        result_count: 1,
+        params: {},
+        columns: ["zero", "null", "false"],
+        default_limit: 1000,
+        relations: {},
+        colrender: {},
+        rows: [[0, null, false]],
+      });
+    });
+
+    server.put(
+      "/admin/plugins/discourse-data-explorer/queries/2",
+      (request) => {
+        updateParams = new URLSearchParams(request.requestBody);
+        query2Tags = updateParams
+          .getAll("query[tags][]")
+          .map((tag) => tag.toLowerCase());
+        return helper.response({
+          query: {
+            id: 2,
+            sql: 'SELECT 0 zero, null "null", false "false"',
+            name: "What about 0?",
+            description: "",
+            param_info: [],
+            group_ids: [],
+            tags: query2Tags,
+            automatic_tags: ["custom"],
+            hidden: false,
+            user_id: 1,
+          },
+        });
+      }
+    );
+
+    server.put(
+      "/admin/plugins/discourse-data-explorer/queries/-6",
+      (request) => {
+        updateParams = new URLSearchParams(request.requestBody);
+        return helper.response({
+          query: {
+            id: -6,
+            sql: "SELECT 1",
+            name: "Top 100 Likers",
+            description: "",
+            param_info: [],
+            group_ids: [],
+            tags: ["default", "monthly"],
+            automatic_tags: ["default"],
+            hidden: false,
+            user_id: -1,
+            is_default: true,
+          },
+        });
+      }
+    );
+
+    server.delete("/admin/plugins/discourse-data-explorer/queries/2", () => {
+      query2Deletes += 1;
+      return helper.response({ success: true, errors: [] });
+    });
+
+    server.get("/session/csrf.json", function () {
+      return helper.response({
+        csrf: "mgk906YLagHo2gOgM1ddYjAN4hQolBdJCqlY6jYzAYs= ",
+      });
+    });
+
+    server.get("/g/testgroup/reports/2", () => {
+      return helper.response({
+        query: {
+          id: 2,
+          sql: 'SELECT 0 zero, null "null", false "false"',
+          name: "Group Test Query",
+          description: "Test query for group reports",
+          param_info: [],
+          created_at: "2023-05-04T22:16:06.007Z",
+          username: "system",
+          group_ids: [1],
+          last_run_at: "2023-05-04T22:16:23.858Z",
+          hidden: false,
+          user_id: 1,
+        },
+        query_group: {
+          id: 1,
+          group_id: 1,
+          query_id: 2,
+        },
+      });
+    });
+
+    server.post("/g/testgroup/reports/2/run", () => {
+      return helper.response({
+        success: true,
+        errors: [],
+        duration: 1.0,
+        result_count: 1,
+        params: {},
+        columns: ["zero", "null", "false"],
+        default_limit: 1000,
+        relations: {},
+        colrender: {},
+        rows: [[0, null, false]],
+      });
+    });
+
+    server.get("/groups/testgroup.json", () => {
+      return helper.response({
+        group: {
+          id: 1,
+          name: "testgroup",
+        },
+      });
+    });
+  });
+
+  test("runs query and renders data and a chart", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/-6");
+
+    assert
+      .dom("div.name h1")
+      .hasText("Top 100 Likers", "the query name was rendered");
+
+    assert.dom("div.query-edit").exists("the query code was rendered");
+
+    assert
+      .dom(".query-run-split__primary span")
+      .hasText(i18n("explorer.run"), "the run button was rendered");
+
+    await click(".query-run-split__primary");
+
+    assert.dom("canvas").exists("the chart was rendered by default");
+
+    await click(".query-results-modes input[value='table']");
+
+    assert
+      .dom("div.query-results table tbody tr")
+      .exists({ count: 2 }, "the table with query results was rendered");
+
+    assert
+      .dom(".query-results-modes")
+      .exists("the chart/table toggle buttons were rendered");
+  });
+
+  test("runs query and is able to download the results", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/-6");
+
+    await click(".query-run-split__primary");
+
+    const createElement = document.createElement.bind(document);
+    const appendChild = document.body.appendChild.bind(document.body);
+    const removeChild = document.body.removeChild.bind(document.body);
+
+    const finishedForm = sinon.promise();
+
+    let formElement;
+
+    const formStub = sinon
+      .stub(document, "createElement")
+      .callsFake((tagName) => {
+        if (tagName === "form") {
+          formElement = {
+            fakeForm: true,
+            setAttribute: sinon.stub(),
+            appendChild: sinon.stub(),
+            submit: sinon.stub().callsFake(finishedForm.resolve),
+          };
+
+          return formElement;
+        }
+
+        return createElement(tagName);
+      });
+
+    const appendChildStub = sinon
+      .stub(document.body, "appendChild")
+      .callsFake((el) => {
+        if (!el.fakeForm) {
+          return appendChild(el);
+        }
+      });
+
+    const removeChildStub = sinon
+      .stub(document.body, "removeChild")
+      .callsFake((el) => {
+        if (!el.fakeForm) {
+          return removeChild(el);
+        }
+      });
+
+    await click(".query-action-bar__right .query-result-download-buttons");
+    await click(".query-result-export__results-json");
+
+    await finishedForm;
+
+    formStub.restore();
+    appendChildStub.restore();
+    removeChildStub.restore();
+
+    assert.true(window.open.called, "window.open was called for downloading");
+    assert.true(formStub.called, "form was created for downloading");
+    assert.true(
+      formElement.submit.called,
+      "form was submitted for downloading"
+    );
+
+    assert.true(
+      formElement.setAttribute.calledWith("action"),
+      "form action attribute was set"
+    );
+    assert.true(
+      formElement.setAttribute.calledWith("method", "post"),
+      "form method attribute was set to POST"
+    );
+  });
+
+  test("runs query and renders 0, false, and NULL values correctly", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/2");
+
+    assert
+      .dom("div.name h1 span")
+      .hasText("What about 0?", "the query name was rendered");
+
+    assert
+      .dom(".query-run-split__primary span")
+      .hasText(i18n("explorer.run"), "the run button was rendered");
+
+    await click(".query-run-split__primary");
+
+    // Default view is chart for chartable data; switch to table to inspect cells.
+    if (document.querySelector(".query-results-modes input[value='table']")) {
+      await click(".query-results-modes input[value='table']");
+    }
+
+    assert
+      .dom("div.query-results tbody td:nth-child(1)")
+      .hasText("0", "renders '0' values");
+
+    assert
+      .dom("div.query-results tbody td:nth-child(2)")
+      .hasText("NULL", "renders 'NULL' values");
+
+    assert
+      .dom("div.query-results tbody td:nth-child(3)")
+      .hasText("false", "renders 'false' values");
+
+    assert.strictEqual(
+      currentURL(),
+      "/admin/plugins/discourse-data-explorer/queries/2",
+      "running a query without inputs does not add a null params query string"
+    );
+  });
+
+  test("deleting a query asks for confirmation first", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/2");
+
+    await click(".query-action-bar__right .btn-danger");
+
+    assert
+      .dom(".dialog-body")
+      .hasText(i18n("explorer.delete_confirm"), "the confirmation is shown");
+    assert.strictEqual(query2Deletes, 0, "opening the dialog does not delete");
+
+    await click(".dialog-footer .btn-default");
+
+    assert.dom(".dialog-body").doesNotExist("cancelling closes the dialog");
+    assert.strictEqual(query2Deletes, 0, "cancelling does not delete");
+
+    await click(".query-action-bar__right .btn-danger");
+    await click(".dialog-footer .btn-danger");
+
+    assert.strictEqual(query2Deletes, 1, "confirming deletes the query");
+    assert
+      .dom(".query-action-bar__right .btn-danger")
+      .doesNotExist("the delete button is gone after deleting");
+    assert
+      .dom(".query-action-bar__right")
+      .includesText(i18n("explorer.recover"), "the undelete button is offered");
+  });
+
+  test("adds a new tag while editing a query", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/2");
+
+    const tags = selectKit(".query-edit .query-tag-chooser");
+    await tags.expand();
+    assert
+      .dom(".query-tag-chooser .tag-choice.disabled")
+      .hasText("custom", "the custom tag cannot be removed");
+    assert.false(
+      tags.displayedContent().some((row) => row.name === "default"),
+      "the system-only default tag is not offered on user queries"
+    );
+    await tags.fillInFilter("Default");
+    assert.deepEqual(
+      tags.displayedContent(),
+      [],
+      "the default tag cannot be created on user queries"
+    );
+    await tags.emptyFilter();
+    await tags.fillInFilter("Monthly");
+    await tags.selectRowByValue("Monthly");
+
+    assert
+      .dom(".query-run-split__primary span")
+      .hasText(i18n("explorer.saverun"), "changing tags marks the query dirty");
+
+    await click(".query-run-split__primary");
+
+    assert.deepEqual(
+      updateParams.getAll("query[tags][]"),
+      ["custom", "existing", "Monthly"],
+      "the edited tags are saved"
+    );
+    assert.strictEqual(
+      updateParams.get("query[group_ids_present]"),
+      "true",
+      "the group selection is explicitly submitted"
+    );
+    assert.deepEqual(
+      updateParams.getAll("query[group_ids][]"),
+      [],
+      "an empty group selection sends no group IDs"
+    );
+  });
+
+  test("removes the last tag while editing a query", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/2");
+
+    const tags = selectKit(".query-edit .query-tag-chooser");
+    await tags.expand();
+    await tags.deselectItemByValue("existing");
+    await click(".query-run-split__primary");
+
+    assert.strictEqual(
+      updateParams.get("query[tags_present]"),
+      "true",
+      "the empty tag selection is explicitly submitted"
+    );
+    assert.deepEqual(
+      updateParams.getAll("query[tags][]"),
+      ["custom"],
+      "the removed tag is absent from the request"
+    );
+
+    await visit("/admin/plugins/discourse-data-explorer/queries");
+    await visit("/admin/plugins/discourse-data-explorer/queries/2");
+
+    assert
+      .dom(".query-edit .query-tag-chooser .selected-choice")
+      .doesNotExist("the removed tag stays absent after reloading the query");
+
+    await tags.expand();
+    assert
+      .dom(".query-edit .query-tag-chooser .tag-choice.disabled")
+      .hasText("custom", "the custom tag remains");
+  });
+
+  test("edits additional tags on a default query", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/-6");
+
+    const tags = selectKit(".query-edit .query-tag-chooser");
+    await tags.expand();
+    assert
+      .dom(".query-tag-chooser .tag-choice.disabled")
+      .hasText("default", "the default tag cannot be removed");
+    assert.false(
+      tags.displayedContent().some((row) => row.name === "custom"),
+      "the custom tag is not offered on default queries"
+    );
+
+    await tags.deselectItemByValue("existing");
+    await tags.fillInFilter("Monthly");
+    await tags.selectRowByValue("Monthly");
+    await click(".query-run-split__primary");
+
+    assert.deepEqual(
+      updateParams.getAll("query[tags][]"),
+      ["default", "Monthly"],
+      "additional tags can be removed and added"
+    );
+  });
+
+  test("automatically runs query when run query parameter is present", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/2?run");
+
+    assert.dom("div.query-results").exists("query results should be displayed");
+  });
+
+  test("automatically runs query when run query parameter is present on group report route", async function (assert) {
+    await visit("/g/testgroup/reports/2?run=1");
+
+    assert.dom("div.query-results").exists("query results should be displayed");
+  });
+
+  test("dragging the grippie resizes the editor panes", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/2");
+
+    const grippie = find(".query-editor .grippie");
+    const panes = find(".query-editor .panels-flex");
+    stubPointerCapture(grippie);
+    const startingHeight = panes.clientHeight;
+
+    await triggerEvent(grippie, "pointerdown", {
+      button: 0,
+      pointerId: 1,
+      clientY: 200,
+    });
+    // No sideways movement: a vertical resize must not need any.
+    await triggerEvent(grippie, "pointermove", { pointerId: 1, clientY: 240 });
+    await settleGestureFrame();
+
+    assert.strictEqual(
+      panes.style.height,
+      `${startingHeight + 40}px`,
+      "the panes grow by the pointer's vertical travel"
+    );
+    // Asserted mid-gesture as well as after: absence on release alone would
+    // pass against a resize that never held the cursor at all.
+    assert
+      .dom(document.body)
+      .hasClass("d-resizing-ns", "the cursor is held while the drag runs");
+
+    await triggerEvent(grippie, "pointerup", { pointerId: 1, clientY: 240 });
+    assert
+      .dom(document.body)
+      .doesNotHaveClass(
+        "d-resizing-ns",
+        "the held cursor is given back on release"
+      );
+  });
+
+  test("the grippie is an operable separator", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/2");
+
+    const grippie = find(".query-editor .grippie");
+
+    assert
+      .dom(grippie)
+      .hasAttribute("role", "separator")
+      .hasAttribute("aria-orientation", "horizontal")
+      .hasAttribute("tabindex", "0")
+      .hasAttribute("data-resize-axis", "vertical");
+    assert
+      .dom(grippie)
+      .hasAttribute(
+        "aria-label",
+        i18n("explorer.resize_editor"),
+        "the separator says what it resizes rather than announcing a bare splitter"
+      );
+
+    const panes = find(".query-editor .panels-flex");
+    const startingHeight = panes.clientHeight;
+    await triggerKeyEvent(grippie, "keydown", "ArrowDown");
+
+    assert.true(
+      parseInt(panes.style.height, 10) > startingHeight,
+      "arrow keys resize it without a pointer"
+    );
+  });
+
+  test("the separator announces a size inside the bounds it announces", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/2");
+
+    const grippie = find(".query-editor .grippie");
+    const read = (name) => parseFloat(grippie.getAttribute(name));
+
+    // Asserted against each other, not against pixels. The numbers depend on the
+    // stylesheet and the window; a size outside its own range is wrong regardless.
+    assert.true(
+      Number.isFinite(read("aria-valuenow")),
+      "a size is announced once the panes are measured"
+    );
+    assert.true(
+      read("aria-valuemin") <= read("aria-valuenow"),
+      "the announced size is not below the announced minimum"
+    );
+    assert.true(
+      read("aria-valuenow") <= read("aria-valuemax"),
+      "the announced size is not above the announced maximum"
+    );
+  });
+
+  test("dragging far past the maximum stops at it", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/2");
+
+    const grippie = find(".query-editor .grippie");
+    const panes = find(".query-editor .panels-flex");
+    stubPointerCapture(grippie);
+    const ceiling = parseFloat(grippie.getAttribute("aria-valuemax"));
+
+    await triggerEvent(grippie, "pointerdown", {
+      button: 0,
+      pointerId: 1,
+      clientY: 200,
+    });
+    await triggerEvent(grippie, "pointermove", {
+      pointerId: 1,
+      clientY: 200 + ceiling * 3,
+    });
+    await settleGestureFrame();
+    await triggerEvent(grippie, "pointerup", {
+      pointerId: 1,
+      clientY: 200 + ceiling * 3,
+    });
+
+    assert.true(
+      parseFloat(panes.style.height) <= ceiling,
+      "the panes stop at the maximum rather than following the pointer"
+    );
+  });
+
+  test("a separator torn down mid-gesture writes nothing afterwards", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/2");
+
+    const grippie = find(".query-editor .grippie");
+    const panes = find(".query-editor .panels-flex");
+    stubPointerCapture(grippie);
+
+    await triggerEvent(grippie, "pointerdown", {
+      button: 0,
+      pointerId: 1,
+      clientY: 200,
+    });
+    await triggerEvent(grippie, "pointermove", { pointerId: 1, clientY: 260 });
+    await settleGestureFrame();
+    const heightWhenTornDown = panes.style.height;
+
+    // Leaving the route with the gesture still held: the separator goes, and the
+    // controller is a singleton that outlives it.
+    await visit("/admin/plugins/discourse-data-explorer");
+    await triggerEvent(document, "pointerup", { pointerId: 1, clientY: 900 });
+
+    assert.strictEqual(
+      panes.style.height,
+      heightWhenTornDown,
+      "the detached panes keep the size they had when the separator went"
+    );
+  });
+});
+
+acceptance("Run Query | non-admin", function (needs) {
+  needs.user({ admin: false });
+  needs.settings({ data_explorer_enabled: true });
+
+  needs.pretender((server, helper) => {
+    stubPluginDetails(server, helper);
+  });
+
+  test("shows the admins only error page", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/62");
+
+    assert.dom(".error-page .desc").hasText(i18n("explorer.admins_only"));
+  });
+
+  test("shows the admins only error page for a new query", async function (assert) {
+    await visit("/admin/plugins/discourse-data-explorer/queries/new");
+
+    assert.dom(".error-page .desc").hasText(i18n("explorer.admins_only"));
+  });
+});

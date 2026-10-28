@@ -1,0 +1,26 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+fa_IR:
+  js:
+    discourse_rewind:
+      share:
+        toggle_label:
+          private: "خصوصی"
+          public: "عمومی"
+      reports:
+        reading_time:
+          title: زمان مطالعه
+        chat_usage:
+          author: شما
+          author_others: "%{username}"
+          status_online: "● آنلاین"
+        live_usage:
+          minutes:
+            one: "%{count} دقیقه"
+            other: "%{count} دقیقه"
+        writing_analysis:
+          menu_other: دیگر

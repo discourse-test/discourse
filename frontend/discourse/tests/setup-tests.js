@@ -1,0 +1,500 @@
+/* eslint-disable simple-import-sort/imports */
+import { noteKeyboardEvidence } from "discourse/services/capabilities";
+import Application from "discourse/app";
+import "./loader-shims.js";
+import "discourse/static/markdown-it";
+/* eslint-enable simple-import-sort/imports */
+
+import { ASYNC_OBSERVERS, SYNC_OBSERVERS } from "@ember/-internals/metal";
+import { getOwner } from "@ember/owner";
+import { run } from "@ember/runloop";
+import {
+  getSettledState,
+  isSettled,
+  pauseTest,
+  setApplication,
+  setResolver,
+} from "@ember/test-helpers";
+import $ from "jquery";
+import "message-bus-client";
+// Captures `setTimeout` when evaluated, so it must load before a test can fake timers
+import "pikaday";
+import * as FakerModule from "@faker-js/faker";
+import QUnit from "qunit";
+import sinon from "sinon";
+import { clearExtraAttributes } from "discourse/data/extra-attributes";
+import { setDefaultOwner } from "discourse/lib/get-owner";
+import { setupS3CDN, setupURL } from "discourse/lib/get-url";
+import { setLoadedFaker } from "discourse/lib/load-faker";
+import PreloadStore from "discourse/lib/preload-store";
+import { loadSprites } from "discourse/lib/svg-sprite-loader";
+import { resetSettings as resetThemeSettings } from "discourse/lib/theme-settings-store";
+import { WebauthnAbortHandler } from "discourse/lib/webauthn";
+import { resetCategoryCache } from "discourse/models/category";
+import Session from "discourse/models/session";
+import User from "discourse/models/user";
+import { disableCloaking } from "discourse/modifiers/post-stream-viewport-tracker";
+import { buildResolver } from "discourse/resolver";
+import SiteSettingService from "discourse/services/site-settings";
+import { flushMap } from "discourse/services/store";
+import pretender, {
+  applyDefaultHandlers,
+  pretenderHelpers,
+  resetPretender,
+} from "discourse/tests/helpers/create-pretender";
+import { setupDeprecationCounter } from "discourse/tests/helpers/deprecation-counter";
+import { clearState as clearPresenceState } from "discourse/tests/helpers/presence-pretender";
+import {
+  applyPretender,
+  resetSite,
+  testCleanup,
+  testsInitialized,
+  testsTornDown,
+} from "discourse/tests/helpers/qunit-helpers";
+import { configureRaiseOnDeprecation } from "discourse/tests/helpers/raise-on-deprecation";
+import { resetSettings } from "discourse/tests/helpers/site-settings";
+import {
+  disableLoadMoreObserver,
+  enableLoadMoreObserver,
+} from "discourse/ui-kit/d-load-more";
+import {
+  disableVirtualization,
+  enableVirtualization,
+} from "discourse/ui-kit/-internals/windowing/virtualizer";
+
+const REPORT_MEMORY = false;
+let cancelled = false;
+let started = false;
+
+function createApplication(config, settings) {
+  const app = Application.create(config);
+
+  setApplication(app);
+  setResolver(buildResolver("discourse").create({ namespace: app }));
+
+  // Modern Ember only sets up a container when the ApplicationInstance
+  // is booted. We have legacy code which relies on having access to a container
+  // before boot (e.g. during pre-initializers)
+  //
+  // This hack sets up a container early, then stubs the container setup method
+  // so that Ember will use the same container instance when it boots the ApplicationInstance
+  //
+  // Note that this hack is not required in production because we use the default `autoboot` flag,
+  // which triggers the internal `_globalsMode` flag, which sets up an ApplicationInstance immediately when
+  // an Application is initialized (via the `_buildDeprecatedInstance` method).
+  //
+  // In the future, we should move away from relying on the `container` before the ApplicationInstance
+  // is booted, and then remove this hack.
+  let container = app.__registry__.container();
+  app.__container__ = container;
+  setDefaultOwner(container);
+  sinon
+    .stub(Object.getPrototypeOf(app.__registry__), "container")
+    .callsFake((opts) => {
+      container.owner = opts.owner;
+      container.registry = opts.owner.__registry__;
+      return container;
+    });
+
+  SiteSettingService.create = () => settings;
+
+  if (!started) {
+    app.instanceInitializer({
+      name: "test-helper",
+      initialize: testsInitialized,
+      teardown: testsTornDown,
+    });
+
+    app.start();
+    started = true;
+  }
+
+  return app;
+}
+
+function setupToolbar() {
+  // Most default toolbar items aren't useful for Discourse
+  QUnit.config.urlConfig = QUnit.config.urlConfig.filter(
+    (c) =>
+      ![
+        "noglobals",
+        "nolint",
+        "devmode",
+        "dockcontainer",
+        "nocontainer",
+      ].includes(c.id)
+  );
+
+  QUnit.config.urlConfig.push({
+    id: "loop",
+    label: "Loop until failure",
+    value: "1",
+  });
+
+  QUnit.config.urlConfig.push({
+    id: "target",
+    label: "Target",
+    value: [
+      "core",
+      "plugins",
+      "theme-qunit",
+      "-----",
+      ...(window._discourseQunitPluginNames || []),
+    ],
+  });
+
+  QUnit.begin(() => {
+    const select = document.querySelector(
+      `#qunit-testrunner-toolbar [name=target]`
+    );
+
+    const testingThemeId = parseInt(
+      document.querySelector("script[data-theme-id]")?.dataset.themeId,
+      10
+    );
+    if (testingThemeId) {
+      select.innerHTML = `<option selected>theme id ${testingThemeId}</option>`;
+      select.disabled = true;
+      return;
+    }
+
+    select.value ||= "core";
+    select.querySelector("option:not([value])").remove();
+    select.querySelector("option[value=-----]").disabled = true;
+    select.querySelector("option[value=plugins]").innerText =
+      "all plugins (not recommended)";
+  });
+
+  // Abort tests when the qunit controls are clicked
+  document.querySelector("#qunit").addEventListener("click", ({ target }) => {
+    if (!target.closest("#qunit-testrunner-toolbar")) {
+      // Outside toolbar, carry on
+      return;
+    }
+
+    if (target.closest("label[for=qunit-urlconfig-hidepassed]")) {
+      // This one can be toggled during tests, carry on
+      return;
+    }
+
+    if (["INPUT", "SELECT", "LABEL"].includes(target.tagName)) {
+      cancelled = true;
+      document.querySelector("#qunit-abort-tests-button")?.click();
+    }
+  });
+}
+
+function reportMemoryUsageAfterTests() {
+  if (!REPORT_MEMORY) {
+    return;
+  }
+  QUnit.done(() => {
+    const usageBytes = performance.memory?.usedJSHeapSize;
+    let result;
+    if (usageBytes) {
+      result = `${(usageBytes / Math.pow(2, 30)).toFixed(3)}GB`;
+    } else {
+      result = "(performance.memory api unavailable)";
+    }
+
+    writeSummaryLine(`Used JS Heap Size: ${result}`);
+  });
+}
+
+function writeSummaryLine(message) {
+  // eslint-disable-next-line no-console
+  console.log(`\n${message}\n`);
+  if (window.Testem) {
+    window.Testem.useCustomAdapter(function (socket) {
+      socket.emit("test-metadata", "summary-line", {
+        message,
+      });
+    });
+  }
+}
+
+export default async function setupTests(config) {
+  const target = getUrlParameter("target") || "core";
+
+  disableCloaking();
+
+  setupDeprecationCounter({ QUnit, origin: target });
+
+  QUnit.config.hidepassed = true;
+  QUnit.config.testTimeout = 60_000;
+
+  // Available in tests without an import
+  window.pauseTest = pauseTest;
+
+  // Stop the message bus so we don't get ajax calls
+  window.MessageBus.stop();
+
+  // disable logster error reporting
+  if (window.Logster) {
+    window.Logster.enabled = false;
+  } else {
+    window.Logster = { enabled: false };
+  }
+
+  let setupData;
+  const setupDataElement = document.getElementById("data-discourse-setup");
+  if (setupDataElement) {
+    setupData = setupDataElement.dataset;
+    setupDataElement.remove();
+  }
+
+  await loadSprites(setupData.svgSpritePath, "fontawesome");
+
+  // Shortcuts render only when a keyboard is likely; assume one before the
+  // first test, and after each test in testCleanup, so rendering does not
+  // depend on the test browser's pointer.
+  noteKeyboardEvidence();
+
+  const headlessTestem =
+    window.Testem && navigator.userAgent.includes("HeadlessChrome");
+  const preexistingObserved = new Set([
+    ...ASYNC_OBSERVERS.keys(),
+    ...SYNC_OBSERVERS.keys(),
+  ]);
+
+  let app;
+  QUnit.testStart(async function (ctx) {
+    let settings = resetSettings();
+
+    resetThemeSettings();
+
+    app = createApplication(config, settings);
+
+    const cdn = setupData ? setupData.cdn : null;
+    const baseUri = setupData ? setupData.baseUri : "";
+    setupURL(cdn, "http://localhost:3000", baseUri, { snapshot: true });
+    if (setupData && setupData.s3BaseUrl) {
+      setupS3CDN(setupData.s3BaseUrl, setupData.s3Cdn, { snapshot: true });
+    } else {
+      setupS3CDN(null, null, { snapshot: true });
+    }
+
+    applyDefaultHandlers();
+
+    pretender.prepareBody = function (body) {
+      if (typeof body === "object") {
+        return JSON.stringify(body);
+      }
+      return body;
+    };
+
+    if (QUnit.config.logAllRequests) {
+      pretender.handledRequest = function (verb, path) {
+        // eslint-disable-next-line no-console
+        console.log("REQ: " + verb + " " + path);
+      };
+    }
+
+    pretender.unhandledRequest = function (verb, path) {
+      if (QUnit.config.logAllRequests) {
+        // eslint-disable-next-line no-console
+        console.log("REQ: " + verb + " " + path + " missing");
+      }
+
+      const error =
+        "Unhandled request in test environment: " + path + " (" + verb + ")";
+
+      // eslint-disable-next-line no-console
+      console.error(error);
+      throw new Error(error);
+    };
+
+    pretender.checkPassthrough = (request) =>
+      request.requestHeaders["Discourse-Script"];
+
+    applyPretender(ctx.module, pretender, pretenderHelpers());
+
+    Session.resetCurrent();
+    User.resetCurrent();
+
+    PreloadStore.reset();
+    resetSite();
+
+    resetCategoryCache();
+
+    // Access the container that's set up in createApplication
+    const scrollManager = app.__container__.lookup("service:scroll-manager");
+    sinon.stub(scrollManager, "bindScrolling");
+    sinon.stub(scrollManager, "unbindScrolling");
+
+    disableLoadMoreObserver();
+
+    // Rendering tests mount in a zero-height container, so a virtualizer would compute an
+    // empty window and render nothing. Disable it globally (opt back in per-test with
+    // enableVirtualization) so tests mount every row; mirrors disableLoadMoreObserver.
+    //
+    // The fallback is a different code path, in which a row's index and its item can
+    // never disagree. A consumer whose behaviour depends on windowing therefore needs
+    // its own module that opts back in, or its suite says nothing about what ships.
+    disableVirtualization();
+  });
+
+  QUnit.testDone(function () {
+    testCleanup(getOwner(app), app);
+
+    // A pending ceremony never settles in headless Chrome, so it would retain the app
+    WebauthnAbortHandler.controller?.abort();
+
+    // An open lightbox is a window global that would stop later tests opening one
+    window.pswp?.destroy();
+
+    // Test modules can keep fakes after the test; their unformatted error stacks,
+    // call history and pending timers would retain the test's owner
+    for (const fake of sinon.getFakes()) {
+      delete fake.stackTraceError;
+    }
+    sinon.resetHistory();
+    sinon.clock?.reset();
+    sinon.restore();
+
+    // Destroy the previous Application so its entire dependency graph
+    // (ApplicationInstance, container, registry, services, etc.) can be GC'd.
+    // Without this, every test leaks an Application which is never torn down.
+    run(() => {
+      app.destroy();
+    });
+
+    // Ember keeps observed objects in global maps until they're destroyed,
+    // which models never are
+    for (const map of [ASYNC_OBSERVERS, SYNC_OBSERVERS]) {
+      for (const observed of map.keys()) {
+        if (!preexistingObserved.has(observed)) {
+          map.delete(observed);
+        }
+      }
+    }
+
+    // The inspector shim's global list would otherwise pin the destroyed app's registry.
+    globalThis.emberInspectorApps = globalThis.emberInspectorApps?.filter(
+      (entry) => entry.app !== app
+    );
+
+    resetPretender();
+    clearPresenceState();
+
+    document.body.removeAttribute("class");
+    let html = document.documentElement;
+    html.removeAttribute("class");
+    html.removeAttribute("style");
+    let testing = document.getElementById("ember-testing");
+    testing.removeAttribute("class");
+    testing.removeAttribute("style");
+
+    const testContainer = document.getElementById("ember-testing-container");
+    testContainer.scrollTop = 0;
+    testContainer.scrollLeft = 0;
+
+    flushMap();
+    clearExtraAttributes();
+
+    window.MessageBus.unsubscribe("*");
+    localStorage.clear();
+    if (headlessTestem) {
+      // Chrome keeps logged objects alive for DevTools even when it's closed
+      // eslint-disable-next-line no-console
+      console.clear();
+    }
+    enableLoadMoreObserver();
+    enableVirtualization();
+
+    // Release the app reference so the destroyed app isn't retained
+    // by this closure until the next test creates a new one.
+    app = null;
+  });
+
+  if (getUrlParameter("qunit_disable_auto_start") === "1") {
+    QUnit.config.autostart = false;
+  }
+
+  if (getUrlParameter("loop")) {
+    QUnit.done(({ failed }) => {
+      if (failed === 0 && !cancelled) {
+        window.location.reload();
+      }
+    });
+  }
+
+  handleLegacyParameters();
+
+  const hasPluginJs = !!document.querySelector(
+    "link[rel=modulepreload][data-plugin-name], script[data-plugin-name]"
+  );
+  const hasThemeJs = !!document.querySelector(
+    "link[rel=modulepreload][data-theme-id], script[data-theme-id]"
+  );
+
+  // forces 0 as duration for all jquery animations
+  $.fx.off = true;
+
+  if (headlessTestem) {
+    // Nobody sees this report, and it keeps every passed test's DOM to unhide later
+    QUnit.config.reporters.html = false;
+  } else {
+    setupToolbar();
+  }
+  reportMemoryUsageAfterTests();
+  patchFailedAssertion();
+
+  setLoadedFaker(FakerModule);
+
+  // core tests run without loading plugins or themes
+  const isCoreTest = !hasPluginJs && !hasThemeJs;
+  const isPreinstalledPluginTest = !!document.querySelector(
+    `link[rel=modulepreload][data-plugin-name="${CSS.escape(target)}"][data-preinstalled="true"]`
+  );
+
+  if (config.RAISE_ON_DEPRECATION ?? (isCoreTest || isPreinstalledPluginTest)) {
+    configureRaiseOnDeprecation();
+  }
+}
+
+function getUrlParameter(name) {
+  const queryParams = new URLSearchParams(window.location.search);
+  return queryParams.get(name);
+}
+
+function patchFailedAssertion() {
+  const oldPushResult = QUnit.assert.pushResult;
+
+  QUnit.assert.pushResult = function (resultInfo) {
+    if (!resultInfo.result && !isSettled()) {
+      const settledState = getSettledState();
+      let stateString = Object.entries(settledState)
+        .filter(([, value]) => value === true)
+        .map(([key]) => key)
+        .join(", ");
+
+      if (settledState.pendingRequestCount > 0) {
+        stateString += `, pending requests: ${settledState.pendingRequestCount}`;
+      }
+
+      // eslint-disable-next-line no-console
+      console.warn(
+        `ℹ️ Hint: when the assertion failed, the Ember runloop was not in a settled state. Maybe you missed an \`await\` further up the test? Or maybe you need to manually add \`await settled()\` before your assertion? (${stateString})`
+      );
+    }
+
+    oldPushResult.call(this, resultInfo);
+  };
+}
+
+function handleLegacyParameters() {
+  for (const param of [
+    "qunit_single_plugin",
+    "qunit_skip_core",
+    "qunit_skip_plugins",
+  ]) {
+    if (getUrlParameter(param)) {
+      QUnit.begin(() => {
+        throw new Error(
+          `${param} is no longer supported. Use the 'target' parameter instead`
+        );
+      });
+    }
+  }
+}

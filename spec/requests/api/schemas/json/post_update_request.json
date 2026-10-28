@@ -1,0 +1,22 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "post": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "raw": {
+          "type": "string"
+        },
+        "edit_reason": {
+          "type": "string"
+        }
+      },
+      "required": ["raw"]
+    },
+    "bypass_bump": {
+      "type": "boolean",
+      "description": "Skip bumping the topic when updating the post. Requires staff or TL4 permissions."
+    }
+  }
+}

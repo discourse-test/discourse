@@ -1,0 +1,105 @@
+import Component from "@glimmer/component";
+import { fn } from "@ember/helper";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
+import A11yDialog from "a11y-dialog";
+import { modifier } from "ember-modifier";
+import DButton from "discourse/ui-kit/d-button";
+
+export default class DialogHolder extends Component {
+  @service dialog;
+
+  setupDialog = modifier((element) => {
+    const dialogInstance = new A11yDialog(element);
+    dialogInstance.show();
+
+    dialogInstance.on("hide", () => {
+      this.dialog.hide();
+    });
+
+    return () => {
+      dialogInstance.hide();
+      dialogInstance.destroy();
+    };
+  });
+
+  @action
+  async handleButtonAction(btn) {
+    if (typeof btn.action === "function") {
+      await btn.action();
+    }
+
+    this.dialog.cancel();
+  }
+
+  <template>
+    {{#if this.dialog.show}}
+      <div
+        aria-hidden="true"
+        aria-labelledby={{this.dialog.titleElementId}}
+        class="dialog-container {{this.dialog.class}}"
+        id="dialog-holder"
+        {{this.setupDialog}}
+      >
+        <div class="dialog-overlay" data-a11y-dialog-hide></div>
+
+        {{#if this.dialog.type}}
+          <div class="dialog-content" role="document">
+            {{#if this.dialog.title}}
+              <div class="dialog-header">
+                <h3 id={{this.dialog.titleElementId}}>{{this.dialog.title}}</h3>
+                <DButton
+                  class="btn-flat dialog-close close"
+                  @action={{this.dialog.cancel}}
+                  @icon="xmark"
+                  @title="modal.close"
+                />
+              </div>
+            {{/if}}
+
+            {{#if (or this.dialog.message this.dialog.bodyComponent)}}
+              <div class="dialog-body">
+                {{#if this.dialog.bodyComponent}}
+                  <this.dialog.bodyComponent
+                    @model={{this.dialog.bodyComponentModel}}
+                  />
+                {{else if this.dialog.message}}
+                  <p>{{trustHTML this.dialog.message}}</p>
+                {{/if}}
+              </div>
+            {{/if}}
+
+            {{#if (neq this.dialog.type "notice")}}
+              <div class="dialog-footer">
+                {{#each this.dialog.buttons as |button|}}
+                  <DButton
+                    class={{button.class}}
+                    @action={{fn this.handleButtonAction button}}
+                    @icon={{button.icon}}
+                    @translatedLabel={{button.label}}
+                  />
+                {{else}}
+                  <DButton
+                    class={{this.dialog.confirmButtonClass}}
+                    @action={{this.dialog.didConfirmWrapped}}
+                    @disabled={{this.dialog.confirmButtonDisabled}}
+                    @icon={{this.dialog.confirmButtonIcon}}
+                    @label={{this.dialog.confirmButtonLabel}}
+                  />
+                  {{#if this.dialog.shouldDisplayCancel}}
+                    <DButton
+                      class={{this.dialog.cancelButtonClass}}
+                      @action={{this.dialog.cancel}}
+                      @label={{this.dialog.cancelButtonLabel}}
+                    />
+                  {{/if}}
+                {{/each}}
+              </div>
+            {{/if}}
+          </div>
+        {{/if}}
+      </div>
+    {{/if}}
+  </template>
+}

@@ -1,0 +1,40 @@
+import PluginOutlet from "discourse/components/plugin-outlet";
+import bodyClass from "discourse/helpers/body-class";
+import { slugify } from "discourse/lib/utilities";
+import DBadgeCard from "discourse/ui-kit/d-badge-card";
+import { i18n } from "discourse-i18n";
+
+export default <template>
+  {{bodyClass "badges-page"}}
+
+  <section>
+    <div class="container badges">
+      <h1>{{i18n "badges.title"}}</h1>
+
+      <span>
+        <PluginOutlet @connectorTagName="div" @name="below-badges-title" />
+      </span>
+
+      <div class="badge-groups">
+        {{#each @controller.badgeGroups as |bg|}}
+          <div class="badge-grouping">
+            <div class="title">
+              <h2
+                id={{slugify bg.badgeGrouping.displayName}}
+              >{{bg.badgeGrouping.displayName}}</h2>
+            </div>
+            <div class="badge-group-list">
+              {{#each bg.badges as |b|}}
+                <DBadgeCard
+                  @badge={{b}}
+                  @granted={{b.has_badge}}
+                  @username={{@controller.currentUser.username}}
+                />
+              {{/each}}
+            </div>
+          </div>
+        {{/each}}
+      </div>
+    </div>
+  </section>
+</template>

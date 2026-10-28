@@ -1,0 +1,115 @@
+import Component from "@glimmer/component";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import DEditorOriginalTranslationPreview from "discourse/components/d-editor-original-translation-preview";
+import PostTranslationsModal from "discourse/components/modal/post-translations";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import DMenu from "discourse/float-kit/components/d-menu";
+import lazyHash from "discourse/helpers/lazy-hash";
+import { ajax } from "discourse/lib/ajax";
+import Composer from "discourse/models/composer";
+import DButton from "discourse/ui-kit/d-button";
+import DDropdownMenu from "discourse/ui-kit/d-dropdown-menu";
+import { i18n } from "discourse-i18n";
+
+export default class PostMenuAddTranslationButton extends Component {
+  @service composer;
+  @service modal;
+
+  get showTranslationButton() {
+    return this.args.post.can_localize_post;
+  }
+
+  get addTranslationsLabel() {
+    return i18n("post.localizations.manage", {
+      count: this.args.post.post_localizations_count,
+    });
+  }
+
+  get showViewTranslations() {
+    return this.args.post.post_localizations_count > 0;
+  }
+
+  get viewTranslationLabel() {
+    return i18n("post.localizations.view", {
+      count: this.args.post.post_localizations_count,
+    });
+  }
+
+  @action
+  async viewTranslations() {
+    await this.dMenu.close();
+    this.modal.show(PostTranslationsModal, { model: { post: this.args.post } });
+  }
+
+  @action
+  async addTranslation() {
+    if (!this.args.post.can_localize_post) {
+      return;
+    }
+
+    const { raw } = await ajax(`/posts/${this.args.post.id}.json`);
+
+    await this.composer.open({
+      action: Composer.ADD_TRANSLATION,
+      draftKey: "translation",
+      warningsDisabled: true,
+      hijackPreview: {
+        component: DEditorOriginalTranslationPreview,
+        model: {
+          postLocale: this.args.post.locale,
+          rawPost: raw,
+          translationText: () => this.composer.model?.reply,
+        },
+      },
+      post: this.args.post,
+    });
+  }
+
+  @action
+  onRegisterApi(api) {
+    this.dMenu = api;
+  }
+
+  <template>
+    {{#if this.showTranslationButton}}
+      <DMenu
+        ...attributes
+        class="update-translations-menu"
+        @arrow={{false}}
+        @icon="language"
+        @identifier="post-action-menu-edit-translations"
+        @onRegisterApi={{this.onRegisterApi}}
+        @title={{this.addTranslationsLabel}}
+      >
+        <:content>
+          <DDropdownMenu as |dropdown|>
+            <PluginOutlet
+              @name="post-menu-translations-dropdown"
+              @outletArgs={{lazyHash dropdown=dropdown post=@post}}
+            >
+              {{#if this.showViewTranslations}}
+                <dropdown.item class="update-translations-menu__view">
+                  <DButton
+                    class="post-action-menu__view-translation"
+                    @action={{this.viewTranslations}}
+                    @icon="eye"
+                    @translatedLabel={{this.viewTranslationLabel}}
+                  />
+                </dropdown.item>
+              {{/if}}
+              <dropdown.item class="update-translations-menu__add">
+                <DButton
+                  class="post-action-menu__add-translation"
+                  @action={{this.addTranslation}}
+                  @icon="plus"
+                  @label="post.localizations.add"
+                />
+              </dropdown.item>
+            </PluginOutlet>
+          </DDropdownMenu>
+        </:content>
+      </DMenu>
+    {{/if}}
+  </template>
+}

@@ -1,0 +1,17 @@
+import routeAction from "discourse/helpers/route-action";
+import DButton from "discourse/ui-kit/d-button";
+import { i18n } from "discourse-i18n";
+
+export default <template>
+  <div class="container">
+    <h2>{{i18n "login.to_continue"}}</h2>
+
+    <p style="margin-top: 1em">{{i18n "login.preferences"}}</p>
+
+    <DButton
+      class="btn-primary"
+      @action={{routeAction "showLogin"}}
+      @label="log_in"
+    />
+  </div>
+</template>

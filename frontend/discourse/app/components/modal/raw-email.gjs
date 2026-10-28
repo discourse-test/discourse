@@ -1,0 +1,101 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { action } from "@ember/object";
+import IframedHtml from "discourse/components/iframed-html";
+import Post from "discourse/models/post";
+import DButton from "discourse/ui-kit/d-button";
+import DModal from "discourse/ui-kit/d-modal";
+import { i18n } from "discourse-i18n";
+
+export default class RawEmailComponent extends Component {
+  @tracked rawEmail = this.args.model.rawEmail || "";
+  @tracked textPart = "";
+  @tracked htmlPart = "";
+  @tracked tab = "raw";
+
+  constructor() {
+    super(...arguments);
+    if (this.args.model.id) {
+      this.loadRawEmail(this.args.model.id);
+    }
+  }
+
+  @action
+  async loadRawEmail(postId) {
+    const result = await Post.loadRawEmail(postId);
+    this.rawEmail = result.raw_email;
+    this.textPart = result.text_part;
+    this.htmlPart = result.html_part;
+  }
+
+  @action
+  displayRaw() {
+    this.tab = "raw";
+  }
+
+  @action
+  displayTextPart() {
+    this.tab = "text_part";
+  }
+
+  @action
+  displayHtmlPart() {
+    this.tab = "html_part";
+  }
+
+  <template>
+    <DModal
+      class="incoming-email-modal"
+      @closeModal={{@closeModal}}
+      @title={{i18n "raw_email.title"}}
+    >
+      <:body>
+        <div class="incoming-email-tabs">
+          <DButton
+            class={{if (eq this.tab "raw") "active"}}
+            @action={{this.displayRaw}}
+            @label="post.raw_email.displays.raw.button"
+            @title="post.raw_email.displays.raw.title"
+          />
+
+          {{#if this.textPart}}
+            <DButton
+              class={{if (eq this.tab "text_part") "active"}}
+              @action={{this.displayTextPart}}
+              @label="post.raw_email.displays.text_part.button"
+              @title="post.raw_email.displays.text_part.title"
+            />
+          {{/if}}
+
+          {{#if this.htmlPart}}
+            <DButton
+              class={{if (eq this.tab "html_part") "active"}}
+              @action={{this.displayHtmlPart}}
+              @label="post.raw_email.displays.html_part.button"
+              @title="post.raw_email.displays.html_part.title"
+            />
+          {{/if}}
+        </div>
+
+        <div class="incoming-email-content">
+          {{#if (eq this.tab "raw")}}
+            {{#if this.rawEmail}}
+              <pre class="incoming-email-raw">{{this.rawEmail}}</pre>
+            {{else}}
+              {{i18n "raw_email.not_available"}}
+            {{/if}}
+          {{/if}}
+          {{#if (eq this.tab "text_part")}}
+            <pre class="incoming-email-raw">{{this.textPart}}</pre>
+          {{/if}}
+          {{#if (eq this.tab "html_part")}}
+            <IframedHtml
+              class="incoming-email-html-part"
+              @html={{this.htmlPart}}
+            />
+          {{/if}}
+        </div>
+      </:body>
+    </DModal>
+  </template>
+}

@@ -1,0 +1,131 @@
+import Component from "@glimmer/component";
+import { action } from "@ember/object";
+import { next } from "@ember/runloop";
+import { service } from "@ember/service";
+import { isPresent } from "@ember/utils";
+import InstallThemeModal from "discourse/admin/components/modal/install-theme";
+import ThemesGrid from "discourse/admin/components/themes-grid";
+import { THEMES } from "discourse/admin/models/theme";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import lazyHash from "discourse/helpers/lazy-hash";
+import getURL from "discourse/lib/get-url";
+import DiscourseURL from "discourse/lib/url";
+import DButton from "discourse/ui-kit/d-button";
+import DPageSubheader from "discourse/ui-kit/d-page-subheader";
+import { i18n } from "discourse-i18n";
+
+export default class AdminConfigAreasThemes extends Component {
+  @service currentUser;
+  @service designWizard;
+  @service modal;
+  @service router;
+  @service toasts;
+
+  constructor() {
+    super(...arguments);
+
+    if (isPresent(this.args.repoName) && isPresent(this.args.repoUrl)) {
+      next(() => {
+        this.modal.show(InstallThemeModal, {
+          model: {
+            uploadUrl: this.args.repoUrl,
+            uploadName: this.args.repoName,
+            selection: "directRepoInstall",
+            clearParams: this.clearParams,
+            ...this.installThemeOptions(),
+          },
+        });
+      });
+    }
+  }
+
+  @action
+  installModal() {
+    this.modal.show(InstallThemeModal, {
+      model: { ...this.installThemeOptions() },
+    });
+  }
+
+  // TODO (martin) These install methods may not belong here and they
+  // are incomplete or have stubbed or omitted properties. We may want
+  // to move this to the new config route or a dedicated component
+  // that sits in the route.
+  installThemeOptions() {
+    return {
+      selectedType: THEMES,
+      userId: null,
+      content: this.args.themes,
+      installedThemes: this.args.themes,
+      addTheme: this.addTheme,
+      updateSelectedType: () => {},
+      showThemesOnly: true,
+    };
+  }
+
+  @action
+  addTheme(theme) {
+    this.toasts.success({
+      data: {
+        message: i18n("admin.customize.theme.install_success", {
+          theme: theme.name,
+        }),
+      },
+      duration: "short",
+    });
+
+    DiscourseURL.routeTo(`/admin/customize/themes/${theme.id}`);
+  }
+
+  @action
+  launchDesignWizard() {
+    this.designWizard.launch({ returnUrl: this.router.currentURL });
+  }
+
+  @action
+  clearParams() {
+    this.router.transitionTo(this.router.currentRouteName, {
+      queryParams: { repoUrl: null, repoName: null },
+    });
+  }
+
+  <template>
+    <DPageSubheader
+      @descriptionLabel={{i18n
+        "admin.config_areas.themes_and_components.themes.description"
+        themeSiteSettingsUrl=(getURL
+          "/admin/config/customize/theme-site-settings"
+        )
+      }}
+      @titleLabel={{i18n
+        "admin.config_areas.themes_and_components.themes.title"
+      }}
+    >
+      <:actions as |actions|>
+        <PluginOutlet
+          @name="admin-config-area-themes-new-button"
+          @outletArgs={{lazyHash actions=actions}}
+        >
+          <actions.Primary
+            @action={{this.installModal}}
+            @label="admin.config_areas.themes_and_components.themes.install"
+          />
+        </PluginOutlet>
+      </:actions>
+    </DPageSubheader>
+    <ThemesGrid @openInstallModal={{this.installModal}} @themes={{@themes}} />
+
+    {{#if this.currentUser.can_run_design_wizard}}
+      <div class="admin-config-area-themes__design-wizard">
+        <DButton
+          class="btn-default admin-config-area-themes__design-wizard-button"
+          @action={{this.launchDesignWizard}}
+          @icon="wand-magic"
+          @label="design_wizard.launch"
+        />
+        <span class="admin-config-area-themes__design-wizard-description">
+          {{i18n "design_wizard.launch_description"}}
+        </span>
+      </div>
+    {{/if}}
+  </template>
+}

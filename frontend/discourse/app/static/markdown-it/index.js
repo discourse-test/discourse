@@ -1,0 +1,50 @@
+import { trustHTML } from "@ember/template";
+import DiscourseMarkdownIt from "discourse-markdown-it";
+import loadPluginFeatures from "./features.js";
+import MentionsParser from "./mentions-parser.js";
+import buildOptions from "./options.js";
+
+export function buildEngine(options, omitFromDefault) {
+  return DiscourseMarkdownIt.withCustomFeatures(
+    loadPluginFeatures(),
+    omitFromDefault
+  ).withOptions(buildOptions(options));
+}
+
+// Use this to easily create an instance with proper options
+export function cook(text, options) {
+  return trustHTML(buildEngine(options).cook(text));
+}
+
+// Warm up the engine with a set of options and return a function
+// which can be used to cook without rebuilding the engine every time
+export function generateCookFunction(options) {
+  const engine = buildEngine(options);
+  return (text) => engine.cook(text);
+}
+
+/**
+ * Builds the engine for `options` and returns its link matcher.
+ *
+ * @returns {import("discourse/lib/link-matcher").LinkMatcher}
+ */
+export function generateLinkifyFunction(options) {
+  const engine = buildEngine(options);
+  return engine.linkify;
+}
+
+export function sanitize(text, options) {
+  const engine = buildEngine(options);
+  return engine.sanitize(text);
+}
+
+export function parse(md, options = {}, env = {}) {
+  const engine = buildEngine(options);
+  return engine.parse(md, env);
+}
+
+export function parseMentions(markdown, options) {
+  const engine = buildEngine(options);
+  const mentionsParser = new MentionsParser(engine);
+  return mentionsParser.parse(markdown);
+}

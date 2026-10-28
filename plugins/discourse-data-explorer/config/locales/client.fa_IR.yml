@@ -1,0 +1,52 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+fa_IR:
+  js:
+    data_explorer:
+      admin_dashboard_card:
+        no_results: "هیچ نتیجه‌ای وجود ندارد"
+    explorer:
+      or: "یا"
+      ai:
+        generate: "تولید کردن"
+      help:
+        label: "کمک"
+      schema:
+        filter: "جستجو..."
+      types:
+        bool:
+          yes: "بله"
+          no: "خیر"
+      save: "ذخیر تغییرات"
+      run: "اجرا"
+      delete: "حذف"
+      chart:
+        form:
+          bar: "بار"
+      result_count:
+        one: "%{count} نتیجه."
+        other: "%{count} نتیجه."
+      max_result_count:
+        one: "نمایش %{count} نتیجه برتر."
+        other: "نمایش %{count} نتیجه برتر."
+      name: "نام"
+      query_groups: "گروه‌ها"
+      query_tags: "برچسب‌ها"
+      link: "پیوند برای"
+      report_name: "گزارش"
+      query_description: "توضیح"
+      query_time: "آخرین اجرا"
+      query_user: "ایجاد شده توسط"
+      reset_params: "بازنشانی"
+    group:
+      reports: "گزارش"
+    discourse_workflows:
+      sql:
+        param_value: "مقدار"
+        output:
+          results: "نتایج"
+          no_results: "هیچ نتیجه‌ای وجود ندارد"

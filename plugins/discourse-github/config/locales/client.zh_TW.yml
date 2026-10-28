@@ -1,0 +1,22 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+zh_TW:
+  js:
+    github:
+      pr_status:
+        draft: "草稿"
+        open: "開啟"
+        approved: "已同意"
+        merged: "已合併"
+        closed: "已關閉"
+  admin_js:
+    admin:
+      site_settings:
+        categories:
+          discourse_github: "Discourse GitHub"
+  replace_github_link:
+    edit_reason: "GitHub 連結已替換為永久連結"

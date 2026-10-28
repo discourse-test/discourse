@@ -1,0 +1,69 @@
+import Component from "@glimmer/component";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import HistoryModal from "discourse/components/modal/history";
+import { historyHeat } from "discourse/components/post/meta-data/edits-indicator";
+import { longDate } from "discourse/lib/formatter";
+import DButton from "discourse/ui-kit/d-button";
+import { i18n } from "discourse-i18n";
+
+export default class ReviewablePostEdits extends Component {
+  @service modal;
+  @service siteSettings;
+  @service store;
+
+  get hasEdits() {
+    return this.args.reviewable?.post_version > 1;
+  }
+
+  get editCount() {
+    return this.args.reviewable?.post_version - 1;
+  }
+
+  get historyClass() {
+    return historyHeat(
+      this.siteSettings,
+      new Date(this.args.reviewable?.post_updated_at)
+    );
+  }
+
+  get editedDate() {
+    return longDate(this.args.reviewable?.post_updated_at);
+  }
+
+  get editedTitle() {
+    return i18n("post.last_edited_on", {
+      dateTime: longDate(this.args.reviewable?.post_updated_at),
+    });
+  }
+
+  @action
+  showEditHistory(event) {
+    event?.preventDefault();
+    let postId = this.args.reviewable?.post_id;
+    this.store.find("post", postId).then((post) => {
+      this.modal.show(HistoryModal, {
+        model: {
+          post,
+          postId,
+          postVersion: "latest",
+          topicController: null,
+        },
+      });
+    });
+  }
+
+  <template>
+    {{#if this.hasEdits}}
+      <div class="post-info edits">
+        <DButton
+          class="btn-icon-text btn-flat {{this.historyClass}}"
+          @action={{this.showEditHistory}}
+          @icon="pencil"
+          @translatedLabel={{this.editCount}}
+          @translatedTitle={{this.editedTitle}}
+        />
+      </div>
+    {{/if}}
+  </template>
+}

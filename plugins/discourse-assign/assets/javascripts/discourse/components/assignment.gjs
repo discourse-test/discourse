@@ -1,0 +1,149 @@
+import Component from "@glimmer/component";
+import { hash } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import ComboBox from "discourse/select-kit/components/combo-box";
+import EmailGroupUserChooser from "discourse/select-kit/components/email-group-user-chooser";
+import DTextarea from "discourse/ui-kit/d-textarea";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import { i18n } from "discourse-i18n";
+
+export default class Assignment extends Component {
+  @service siteSettings;
+  @service taskActions;
+
+  get assignee() {
+    return this.args.assignment.username || this.args.assignment.group_name;
+  }
+
+  get targetId() {
+    return this.args.assignment.targetId || this.args.assignment.target?.id;
+  }
+
+  get targetType() {
+    return this.args.assignment.targetType || "Topic";
+  }
+
+  get suggestions() {
+    return this.taskActions.suggestionsFor(this.targetId, this.targetType);
+  }
+
+  get searchUrl() {
+    return this.taskActions.searchUrlFor(this.targetId, this.targetType);
+  }
+
+  get status() {
+    return this.args.assignment.status || this.assignStatuses[0];
+  }
+
+  get assignStatuses() {
+    return this.siteSettings.assign_statuses.split("|").filter(Boolean);
+  }
+
+  get assignStatusOptions() {
+    return this.assignStatuses.map((status) => ({ id: status, name: status }));
+  }
+
+  get assigneeIsEmpty() {
+    return !this.args.assignment.username && !this.args.assignment.group_name;
+  }
+
+  get showAssigneeIeEmptyError() {
+    return this.assigneeIsEmpty && this.args.showValidationErrors;
+  }
+
+  @action
+  handleKeydown(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.args.onSubmit();
+    }
+  }
+
+  @action
+  markAsEdited() {
+    this.args.assignment.isEdited = true;
+  }
+
+  @action
+  setAssignee([newAssignee], [item]) {
+    if (item?.isGroup) {
+      this.args.assignment.username = null;
+      this.args.assignment.group_name = newAssignee;
+    } else {
+      this.args.assignment.username = newAssignee;
+      this.args.assignment.group_name = null;
+    }
+    this.markAsEdited();
+  }
+
+  @action
+  setStatus(status) {
+    this.args.assignment.status = status;
+    this.markAsEdited();
+  }
+
+  <template>
+    <div
+      class="control-group
+        {{if this.showAssigneeIeEmptyError 'assignee-error'}}"
+    >
+      <label>{{i18n "discourse_assign.assign_modal.assignee_label"}}</label>
+      <EmailGroupUserChooser
+        autocomplete="off"
+        @id="assignee-chooser"
+        @onChange={{this.setAssignee}}
+        @options={{hash
+          mobilePlacementStrategy="absolute"
+          searchUrl=this.searchUrl
+          customSearchOptions=(hash defaultSearchResults=this.suggestions)
+          maximum=1
+          tabindex=1
+          expandedOnInsert=(not this.assignee)
+          caretUpIcon="magnifying-glass"
+          caretDownIcon="magnifying-glass"
+        }}
+        @showUserStatus={{true}}
+        @value={{this.assignee}}
+        {{on "keydown" this.handleKeydown capture=true}}
+      />
+
+      {{#if this.showAssigneeIeEmptyError}}
+        <span class="error-label">
+          {{dIcon "triangle-exclamation"}}
+          {{i18n "discourse_assign.assign_modal.choose_assignee"}}
+        </span>
+      {{/if}}
+    </div>
+
+    {{#if this.siteSettings.enable_assign_status}}
+      <div class="control-group assign-status">
+        <label>{{i18n "discourse_assign.assign_modal.status_label"}}</label>
+        <ComboBox
+          @content={{this.assignStatusOptions}}
+          @id="assign-status"
+          @onChange={{this.setStatus}}
+          @value={{this.status}}
+          {{on "keydown" this.handleKeydown capture=true}}
+        />
+      </div>
+    {{/if}}
+
+    <div class="control-group assign-status">
+      <label>
+        {{i18n "discourse_assign.assign_modal.note_label"}}&nbsp;<span
+          class="label-optional"
+        >{{i18n "discourse_assign.assign_modal.optional_label"}}</span>
+      </label>
+
+      <DTextarea
+        id="assign-modal-note"
+        @value={{@assignment.note}}
+        {{on "keydown" this.handleKeydown}}
+        {{on "input" this.markAsEdited}}
+      />
+    </div>
+  </template>
+}

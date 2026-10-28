@@ -1,0 +1,62 @@
+# frozen_string_literal: true
+
+RSpec.describe "Discobot welcome post" do
+  let(:user) { Fabricate(:user) }
+
+  before do
+    SiteSetting.discourse_narrative_bot_enabled = true
+    SiteSetting.disable_discourse_narrative_bot_welcome_post = false
+  end
+
+  context "when discourse_narrative_bot_welcome_post_delay is 0" do
+    it "sends the welcome post immediately" do
+      user
+      expect { sign_in(user) }.to_not change { Jobs::NarrativeInit.jobs.count }
+    end
+  end
+
+  context "when discourse_narrative_bot_welcome_post_delay is greater than 0" do
+    before { SiteSetting.discourse_narrative_bot_welcome_post_delay = 5 }
+
+    context "when user logs in normally" do
+      it "delays the welcome post until the user logs in" do
+        expect { sign_in(user) }.to change { Jobs::NarrativeInit.jobs.count }.by(1)
+        expect(Jobs::NarrativeInit.jobs.first["args"].first["user_id"]).to eq(user.id)
+      end
+    end
+
+    context "when user redeems an invite" do
+      let!(:invite) do
+        Fabricate(:invite, invited_by: Fabricate(:admin), email: "testing@gmail.com")
+      end
+
+      # Redeeming through the legacy form, which the email code flow replaces
+      # when enable_local_logins_via_code is on.
+      before { SiteSetting.enable_local_logins_via_code = false }
+
+      it "delays the welcome post until the user logs in" do
+        expect do
+          put "/invites/show/#{invite.invite_key}.json",
+              params: {
+                username: "somename",
+                name: "testing",
+                password: "verystrongpassword",
+                email_token: invite.email_token,
+              }
+        end.to change { User.count }.by(1)
+
+        expect(Jobs::NarrativeInit.jobs.first["args"].first["user_id"]).to eq(User.last.id)
+      end
+    end
+  end
+
+  context "when user is staged" do
+    let(:staged_user) { Fabricate(:user, staged: true) }
+
+    before { SiteSetting.discourse_narrative_bot_welcome_post_type = "welcome_message" }
+
+    it "does not send a welcome message" do
+      expect { staged_user }.to_not change { Jobs::SendDefaultWelcomeMessage.jobs.count }
+    end
+  end
+end

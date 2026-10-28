@@ -1,0 +1,299 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { Input } from "@ember/component";
+import { fn } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import didInsert from "@ember/render-modifiers/modifiers/did-insert";
+import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
+import { isEmpty } from "@ember/utils";
+import ForgotPassword from "discourse/components/modal/forgot-password";
+import SecondFactorForm from "discourse/components/second-factor-form";
+import SecurityKeyForm from "discourse/components/security-key-form";
+import valueEntered from "discourse/helpers/value-entered";
+import { ajax } from "discourse/lib/ajax";
+import { isReadOnlyError, popupAjaxError } from "discourse/lib/ajax-error";
+import { escapeExpression } from "discourse/lib/utilities";
+import { getWebauthnCredential } from "discourse/lib/webauthn";
+import DPasswordField from "discourse/ui-kit/d-password-field";
+import DSecondFactorInput from "discourse/ui-kit/d-second-factor-input";
+import DTogglePasswordMask from "discourse/ui-kit/d-toggle-password-mask";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import { i18n } from "discourse-i18n";
+
+export default class LocalLoginForm extends Component {
+  @service login;
+  @service modal;
+  @service siteSettings;
+
+  @tracked maskPassword = true;
+  @tracked processingEmailLink = false;
+  @tracked capsLockOn = false;
+
+  get credentialsClass() {
+    return this.args.showSecondFactor || this.args.showSecurityKey
+      ? "hidden"
+      : "";
+  }
+
+  get showSecondFactorForm() {
+    return this.args.showSecondFactor || this.args.showSecurityKey;
+  }
+
+  get disableLoginFields() {
+    return this.args.showSecondFactor || this.args.showSecurityKey;
+  }
+
+  @action
+  passkeyConditionalLogin() {
+    if (this.args.canUsePasskeys) {
+      this.args.passkeyLogin("conditional");
+    }
+  }
+
+  @action
+  scrollInputIntoView(event) {
+    event.target.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  }
+
+  @action
+  togglePasswordMask() {
+    this.maskPassword = !this.maskPassword;
+  }
+
+  @action
+  async emailLogin(event) {
+    event?.preventDefault();
+
+    if (this.processingEmailLink) {
+      return;
+    }
+
+    if (isEmpty(this.args.loginName)) {
+      this.args.flashChanged(i18n("login.blank_username"));
+      this.args.flashTypeChanged("info");
+      return;
+    }
+
+    try {
+      this.processingEmailLink = true;
+      const data = await ajax("/u/email-login", {
+        data: { login: this.args.loginName.trim() },
+        type: "POST",
+      });
+      const loginName = escapeExpression(this.args.loginName);
+      const isEmail = loginName.match(/@/);
+      const key = isEmail
+        ? "email_login.complete_email"
+        : "email_login.complete_username";
+      if (data.user_found === false) {
+        this.args.flashChanged(
+          trustHTML(
+            i18n(`${key}_not_found`, {
+              email: loginName,
+              username: loginName,
+            })
+          )
+        );
+        this.args.flashTypeChanged("error");
+      } else {
+        const postfix = data.hide_taken ? "" : "_found";
+        this.args.flashChanged(
+          trustHTML(
+            i18n(`${key}${postfix}`, {
+              email: loginName,
+              username: loginName,
+            })
+          )
+        );
+        this.args.flashTypeChanged("success");
+      }
+    } catch (e) {
+      if (isReadOnlyError(e)) {
+        this.args.flashChanged(this.login.readOnlyLoginMessage);
+        this.args.flashTypeChanged("error");
+      } else {
+        popupAjaxError(e);
+      }
+    } finally {
+      this.processingEmailLink = false;
+    }
+  }
+
+  @action
+  submit(event) {
+    event.preventDefault();
+    this.args.login();
+  }
+
+  @action
+  filledSecondFactorToken(otp) {
+    this.args.secondFactorTokenChanged(otp);
+    this.args.login();
+  }
+
+  @action
+  showCodeLogin(event) {
+    event?.preventDefault();
+    this.args.onShowCodeLogin();
+  }
+
+  @action
+  handleForgotPassword(event) {
+    event?.preventDefault();
+
+    let filledLoginName = this.args.loginName;
+
+    // no spaces, at least one dot, one @ with one or more characters before & after
+    const likelyEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+      filledLoginName?.trim()
+    );
+
+    if (this.siteSettings.hide_email_address_taken && !likelyEmail) {
+      filledLoginName = null;
+    }
+
+    this.modal.show(ForgotPassword, {
+      model: {
+        emailOrUsername: filledLoginName,
+      },
+    });
+  }
+
+  @action
+  authenticateSecurityKey() {
+    getWebauthnCredential(
+      this.args.securityKeyChallenge,
+      this.args.securityKeyAllowedCredentialIds,
+      (credentialData) => {
+        this.args.securityKeyCredentialChanged(credentialData);
+        this.args.login();
+      },
+      (error) => {
+        this.args.flashChanged(error);
+        this.args.flashTypeChanged("error");
+      }
+    );
+  }
+
+  <template>
+    <form id="login-form" method="post" novalidate {{on "submit" this.submit}}>
+      <div class={{this.credentialsClass}} id="credentials">
+        <div class="input-group" {{didInsert this.passkeyConditionalLogin}}>
+          <Input
+            autocapitalize="off"
+            autocomplete={{if @canUsePasskeys "username webauthn" "username"}}
+            autocorrect="off"
+            autofocus="autofocus"
+            class={{valueEntered @loginName}}
+            disabled={{@showSecondFactor}}
+            id="login-account-name"
+            inputmode="email"
+            tabindex="1"
+            @type="text"
+            @value={{@loginName}}
+            {{on "focusin" this.scrollInputIntoView}}
+            {{on "input" @loginNameChanged}}
+          />
+          <label class="alt-placeholder" for="login-account-name">
+            {{i18n "login.email_placeholder"}}
+          </label>
+          {{#if @canLoginLocalWithEmail}}
+            {{#if @onShowCodeLogin}}
+              <a
+                href
+                id="one-time-code-link"
+                tabindex="3"
+                {{on "click" this.showCodeLogin}}
+              >
+                {{i18n "code_login.email_me_code"}}
+              </a>
+            {{else}}
+              <a
+                class={{if @loginName "" "no-login-filled"}}
+                href
+                id="email-login-link"
+                tabindex="3"
+                {{on "click" this.emailLogin}}
+              >
+                {{i18n "email_login.login_link"}}
+              </a>
+            {{/if}}
+          {{/if}}
+        </div>
+        <div class="input-group">
+          <DPasswordField
+            autocomplete="current-password"
+            class={{valueEntered @loginPassword}}
+            disabled={{this.disableLoginFields}}
+            id="login-account-password"
+            maxlength="200"
+            tabindex="1"
+            type={{if this.maskPassword "password" "text"}}
+            value={{@loginPassword}}
+            @capsLockOn={{this.capsLockOn}}
+            {{on "focusin" this.scrollInputIntoView}}
+            {{on "input" @loginPasswordChanged}}
+          />
+          <label class="alt-placeholder" for="login-account-password">
+            {{i18n "login.password"}}
+          </label>
+          {{#if @loginPassword}}
+            <DTogglePasswordMask
+              tabindex="3"
+              @maskPassword={{this.maskPassword}}
+              @togglePasswordMask={{this.togglePasswordMask}}
+            />
+          {{/if}}
+          <div class="login__password-links">
+            <a
+              href
+              id="forgot-password-link"
+              tabindex="2"
+              {{on "click" this.handleForgotPassword}}
+            >
+              {{i18n "forgot_password.action"}}
+            </a>
+          </div>
+          <div class="caps-lock-warning {{unless this.capsLockOn 'hidden'}}">
+            {{dIcon "triangle-exclamation"}}
+            {{i18n "login.caps_lock_warning"}}</div>
+        </div>
+      </div>
+      {{#if this.showSecondFactorForm}}
+        <SecondFactorForm
+          @backupEnabled={{@backupEnabled}}
+          @isLogin={{true}}
+          @secondFactorMethod={{@secondFactorMethod}}
+          @secondFactorToken={{@secondFactorToken}}
+          @totpEnabled={{@totpEnabled}}
+        >
+          {{#if @showSecurityKey}}
+            <SecurityKeyForm
+              @action={{this.authenticateSecurityKey}}
+              @backupEnabled={{@backupEnabled}}
+              @otherMethodAllowed={{@otherMethodAllowed}}
+              @setSecondFactorMethod={{fn (mut @secondFactorMethod)}}
+              @setShowSecondFactor={{fn (mut @showSecondFactor)}}
+              @setShowSecurityKey={{fn (mut @showSecurityKey)}}
+              @totpEnabled={{@totpEnabled}}
+            />
+          {{else}}
+            <DSecondFactorInput
+              id="login-second-factor"
+              value={{@secondFactorToken}}
+              @onChange={{fn (mut @secondFactorToken)}}
+              @onFill={{this.filledSecondFactorToken}}
+              @secondFactorMethod={{@secondFactorMethod}}
+              {{on "focusin" this.scrollInputIntoView}}
+            />
+          {{/if}}
+        </SecondFactorForm>
+      {{/if}}
+    </form>
+  </template>
+}

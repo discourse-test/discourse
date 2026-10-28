@@ -1,0 +1,503 @@
+# frozen_string_literal: true
+
+RSpec.describe PostVoting::CommentsController do
+  fab!(:user)
+  fab!(:admin)
+  fab!(:moderator)
+  fab!(:group)
+  fab!(:category)
+  fab!(:topic) { Fabricate(:topic, category: category, subtype: Topic::POST_VOTING_SUBTYPE) }
+  fab!(:topic_post) { Fabricate(:post, topic: topic) }
+  fab!(:answer) { Fabricate(:post, topic: topic) }
+  let(:comment) { Fabricate(:post_voting_comment, post: answer) }
+  let(:comment_2) { Fabricate(:post_voting_comment, post: answer) }
+  let(:comment_3) { Fabricate(:post_voting_comment, post: answer) }
+
+  before do
+    SiteSetting.post_voting_enabled = true
+    comment
+    comment_2
+    comment_3
+  end
+
+  describe "#load_comments" do
+    it "returns the right response when user is not allowed to view post" do
+      category.update!(read_restricted: true)
+
+      get "/post_voting/comments.json", params: { post_id: answer.id, last_comment_id: comment.id }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "returns the right response when post_id is invalid" do
+      get "/post_voting/comments.json", params: { post_id: -999_999, last_comment_id: comment.id }
+
+      expect(response.status).to eq(404)
+    end
+
+    it "returns the right response" do
+      get "/post_voting/comments.json", params: { post_id: answer.id, last_comment_id: comment.id }
+
+      expect(response.status).to eq(200)
+      payload = response.parsed_body
+
+      expect(payload["comments"].length).to eq(2)
+
+      comment = payload["comments"].first
+
+      expect(comment["id"]).to eq(comment_2.id)
+      expect(comment["name"]).to eq(comment_2.user.name)
+      expect(comment["username"]).to eq(comment_2.user.username)
+      expect(comment["created_at"].present?).to eq(true)
+      expect(comment["cooked"]).to eq(comment_2.cooked)
+
+      comment = payload["comments"].last
+
+      expect(comment["id"]).to eq(comment_3.id)
+    end
+
+    it "does not expose names when names are disabled" do
+      SiteSetting.enable_names = false
+      comment_2.user.update!(name: "Secret Name")
+
+      get "/post_voting/comments.json", params: { post_id: answer.id, last_comment_id: comment.id }
+
+      expect(response.status).to eq(200)
+      expect(response.body).not_to include("Secret Name")
+      expect(response.parsed_body["comments"].any? { |comment| comment.key?("name") }).to eq(false)
+    end
+  end
+
+  describe "#create" do
+    before { sign_in(user) }
+
+    it "returns the right response when user is not allowed to create post" do
+      category.set_permissions(group => :readonly)
+      category.save!
+
+      post "/post_voting/comments.json", params: { post_id: answer.id, raw: "this is some content" }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "returns 403 when user cannot see the post (e.g. whisper)" do
+      whisper_post = Fabricate(:post, topic: topic, post_type: Post.types[:whisper], user: admin)
+
+      post "/post_voting/comments.json",
+           params: {
+             post_id: whisper_post.id,
+             raw: "this is some content",
+           }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "returns the right response when post_id is invalid" do
+      post "/post_voting/comments.json", params: { post_id: -999_999, raw: "this is some content" }
+
+      expect(response.status).to eq(404)
+    end
+
+    it "publishes a comment created MessageBus message when a new comment is created" do
+      message =
+        MessageBus
+          .track_publish("/topic/#{answer.topic_id}") do
+            expect do
+              post "/post_voting/comments.json",
+                   params: {
+                     post_id: answer.id,
+                     raw: "this is some content",
+                   }
+
+              expect(response.status).to eq(200)
+            end.to change { answer.reload.post_voting_comments.count }.by(1)
+          end
+          .first
+
+      comment = answer.post_voting_comments.last
+      payload = message.data
+
+      expect(payload[:comment][:id]).to eq(comment.id)
+      expect(payload[:comment][:user_id]).to eq(user.id)
+      expect(payload[:comment][:name]).to eq(user.name)
+      expect(payload[:comment][:username]).to eq(user.username)
+      expect(payload[:comment][:created_at]).to be_present
+      expect(payload[:comment][:raw]).to eq("this is some content")
+      expect(payload[:comment][:cooked]).to eq("<p>this is some content</p>")
+      expect(payload[:comment][:post_voting_vote_count]).to eq(0)
+      expect(payload[:comment][:user_voted]).to eq(false)
+    end
+
+    it "publishes a notification when a new comment is created" do
+      answer.user.update!(last_seen_at: Time.zone.now) # User has to be seen recently to trigger notification alert message
+
+      message =
+        MessageBus
+          .track_publish("/notification-alert/#{answer.user_id}") do
+            expect do
+              post "/post_voting/comments.json",
+                   params: {
+                     post_id: answer.id,
+                     raw: "this is some content",
+                   }
+
+              expect(response.status).to eq(200)
+            end.to change { answer.user.notifications.count }.by(1)
+          end
+          .first
+
+      notification = answer.user.notifications.last
+      comment = PostVotingComment.last
+
+      expect(notification.notification_type).to eq(
+        Notification.types[:question_answer_user_commented],
+      )
+      expect(notification.user_id).to eq(answer.user_id)
+      expect(notification.post_number).to eq(answer.post_number)
+      expect(notification.topic_id).to eq(answer.topic_id)
+
+      expect(notification.data).to eq(
+        { post_voting_comment_id: comment.id, display_username: user.username }.to_json,
+      )
+
+      expect(message.data[:notification_type]).to eq(
+        Notification.types[:question_answer_user_commented],
+      )
+    end
+
+    it "returns the right response after creating a new comment" do
+      expect do
+        post "/post_voting/comments.json",
+             params: {
+               post_id: answer.id,
+               raw: "this is some content",
+             }
+
+        expect(response.status).to eq(200)
+      end.to change { answer.reload.post_voting_comments.count }.by(1)
+
+      payload = response.parsed_body
+      comment = answer.post_voting_comments.last
+
+      expect(payload["id"]).to eq(comment.id)
+      expect(payload["name"]).to eq(user.name)
+      expect(payload["username"]).to eq(user.username)
+      expect(payload["cooked"]).to eq(comment.cooked)
+    end
+  end
+
+  describe "#update" do
+    it "returns 403 for an anonymous user" do
+      put "/post_voting/comments.json",
+          params: {
+            comment_id: comment.id,
+            raw: "this is some new raw",
+          }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "returns 404 when comment_id does not identify a comment" do
+      sign_in(comment.user)
+
+      put "/post_voting/comments.json",
+          params: {
+            comment_id: -999_999,
+            raw: "this is some new raw",
+          }
+
+      expect(response.status).to eq(404)
+    end
+
+    it "returns 403 when updating a comment on an inaccessible post" do
+      sign_in(comment.user)
+
+      category.set_permissions(group => :readonly)
+      category.save!
+
+      put "/post_voting/comments.json",
+          params: {
+            comment_id: comment.id,
+            raw: "this is some new raw",
+          }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "returns 403 when updating another user's comment" do
+      sign_in(Fabricate(:user))
+
+      put "/post_voting/comments.json",
+          params: {
+            comment_id: comment.id,
+            raw: "this is some new raw",
+          }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "allows an admin to update the comment" do
+      sign_in(admin)
+
+      put "/post_voting/comments.json",
+          params: {
+            comment_id: comment.id,
+            raw: "this is some new raw",
+          }
+
+      expect(response.status).to eq(200)
+
+      body = response.parsed_body
+
+      expect(body["raw"]).to eq("this is some new raw")
+      expect(body["cooked"]).to eq("<p>this is some new raw</p>")
+    end
+
+    it "allows a moderator to update the comment" do
+      sign_in(moderator)
+
+      put "/post_voting/comments.json",
+          params: {
+            comment_id: comment.id,
+            raw: "this is some new raw",
+          }
+
+      expect(response.status).to eq(200)
+
+      body = response.parsed_body
+
+      expect(body["raw"]).to eq("this is some new raw")
+      expect(body["cooked"]).to eq("<p>this is some new raw</p>")
+    end
+
+    it "returns 403 when the author is silenced" do
+      UserSilencer.silence(comment.user, Discourse.system_user)
+      sign_in(comment.user)
+
+      put "/post_voting/comments.json",
+          params: {
+            comment_id: comment.id,
+            raw: "this is some new raw",
+          }
+
+      expect(response.status).to eq(403)
+      expect(comment.reload.raw).not_to eq("this is some new raw")
+    end
+
+    it "returns 403 when the author edits a comment on a closed topic" do
+      topic.update!(closed: true)
+      sign_in(comment.user)
+
+      put "/post_voting/comments.json",
+          params: {
+            comment_id: comment.id,
+            raw: "this is some new raw",
+          }
+
+      expect(response.status).to eq(403)
+      expect(comment.reload.raw).not_to eq("this is some new raw")
+    end
+
+    it "returns 403 when the author edits a comment on an archived topic" do
+      topic.update!(archived: true)
+      sign_in(comment.user)
+
+      put "/post_voting/comments.json",
+          params: {
+            comment_id: comment.id,
+            raw: "this is some new raw",
+          }
+
+      expect(response.status).to eq(403)
+      expect(comment.reload.raw).not_to eq("this is some new raw")
+    end
+
+    it "still allows staff to edit a comment on a closed topic" do
+      topic.update!(closed: true)
+      sign_in(admin)
+
+      put "/post_voting/comments.json",
+          params: {
+            comment_id: comment.id,
+            raw: "this is some new raw",
+          }
+
+      expect(response.status).to eq(200)
+      expect(comment.reload.raw).to eq("this is some new raw")
+    end
+
+    it "updates the user's own comment and publishes the change" do
+      sign_in(comment.user)
+
+      message =
+        MessageBus
+          .track_publish("/topic/#{comment.post.topic_id}") do
+            put "/post_voting/comments.json",
+                params: {
+                  comment_id: comment.id,
+                  raw: "this is some new raw",
+                }
+
+            expect(response.status).to eq(200)
+          end
+          .first
+
+      body = response.parsed_body
+
+      expect(body["raw"]).to eq("this is some new raw")
+      expect(body["cooked"]).to eq("<p>this is some new raw</p>")
+
+      expect(message.data[:id]).to eq(comment.post_id)
+      expect(message.data[:comment_id]).to eq(comment.id)
+      expect(message.data[:comment_raw]).to eq("this is some new raw")
+      expect(message.data[:comment_cooked]).to eq("<p>this is some new raw</p>")
+    end
+  end
+
+  describe "#flag authentication" do
+    it "returns 403 with not_logged_in for an anonymous user" do
+      put "/post_voting/comments/flag.json",
+          params: {
+            comment_id: comment.id,
+            flag_type_id: ReviewableScore.types[:off_topic],
+          }
+
+      expect(response.status).to eq(403)
+      expect(response.parsed_body["error_type"]).to eq("not_logged_in")
+    end
+  end
+
+  describe "#destroy" do
+    it "returns 403 for an anonymous user" do
+      delete "/post_voting/comments.json", params: { comment_id: comment.id }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "returns 404 when comment_id does not exist" do
+      sign_in(comment.user)
+
+      delete "/post_voting/comments.json", params: { comment_id: -99_999 }
+
+      expect(response.status).to eq(404)
+    end
+
+    it "returns 403 when deleting a comment on an inaccessible post" do
+      sign_in(comment.user)
+
+      category.set_permissions(group => :readonly)
+      category.save!
+
+      delete "/post_voting/comments.json", params: { comment_id: comment.id }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "returns 403 when deleting another user's comment" do
+      sign_in(Fabricate(:user))
+
+      delete "/post_voting/comments.json", params: { comment_id: comment.id }
+
+      expect(response.status).to eq(403)
+    end
+
+    it "allows an admin to delete another user's comment" do
+      sign_in(admin)
+
+      delete "/post_voting/comments.json", params: { comment_id: comment.id }
+
+      expect(response.status).to eq(200)
+      expect(
+        PostVotingComment
+          .with_deleted
+          .where("deleted_at IS NOT NULL AND id = ?", comment.id)
+          .exists?,
+      ).to eq(true)
+    end
+
+    it "allows a moderator to delete another user's comment" do
+      sign_in(moderator)
+
+      delete "/post_voting/comments.json", params: { comment_id: comment.id }
+
+      expect(response.status).to eq(200)
+      expect(
+        PostVotingComment
+          .with_deleted
+          .where("deleted_at IS NOT NULL AND id = ?", comment.id)
+          .exists?,
+      ).to eq(true)
+    end
+
+    it "deletes the user's own comment and publishes the change" do
+      sign_in(comment.user)
+
+      message =
+        MessageBus
+          .track_publish("/topic/#{comment.post.topic_id}") do
+            delete "/post_voting/comments.json", params: { comment_id: comment.id }
+
+            expect(response.status).to eq(200)
+          end
+          .first
+
+      expect(message.data[:id]).to eq(comment.post_id)
+      expect(message.data[:comment_id]).to eq(comment.id)
+      expect(message.data[:comments_count]).to eq(2)
+
+      expect(
+        PostVotingComment
+          .with_deleted
+          .where("deleted_at IS NOT NULL AND id = ?", comment.id)
+          .exists?,
+      ).to eq(true)
+    end
+  end
+
+  describe "#flag" do
+    fab!(:flagger) { Fabricate(:user, group_ids: [Group::AUTO_GROUPS[:trust_level_1]]) }
+
+    before { sign_in(flagger) }
+
+    it "requires the DSA form for illegal reports only when DSA reporting is enabled" do
+      SiteSetting.dsa_reporting_enabled = true
+
+      expect do
+        put "/post_voting/comments/flag.json",
+            params: {
+              comment_id: comment.id,
+              flag_type_id: ReviewableScore.types[:illegal],
+            }
+      end.not_to change(ReviewableScore, :count)
+
+      expect(response).to be_forbidden
+      expect(Reviewable.exists?(target: comment)).to eq(false)
+
+      SiteSetting.dsa_reporting_enabled = false
+
+      put "/post_voting/comments/flag.json",
+          params: {
+            comment_id: comment.id,
+            flag_type_id: ReviewableScore.types[:illegal],
+          }
+
+      expect(response).to be_successful
+      expect(
+        Reviewable.find_by!(target: comment).reviewable_scores.pluck(:reviewable_score_type),
+      ).to eq([ReviewableScore.types[:illegal]])
+    end
+
+    it "returns 403 when flagging a comment on an inaccessible post" do
+      category.set_permissions(group => :full)
+      category.save!
+
+      put "/post_voting/comments/flag.json",
+          params: {
+            comment_id: comment.id,
+            flag_type_id: ReviewableScore.types[:off_topic],
+          }
+
+      expect(response.status).to eq(403)
+    end
+  end
+end

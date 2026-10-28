@@ -1,0 +1,201 @@
+import { hash } from "@ember/helper";
+import { render } from "@ember/test-helpers";
+import { module, test } from "qunit";
+import Form from "discourse/components/form";
+import { setupRenderingTest } from "discourse/tests/helpers/component-test";
+import formKit from "discourse/tests/helpers/form-kit-helper";
+import { NO_VALUE_OPTION } from "discourse/ui-kit/d-native-select";
+
+module(
+  "Integration | Component | FormKit | Controls | Select",
+  function (hooks) {
+    setupRenderingTest(hooks);
+
+    test("default", async function (assert) {
+      let data = { foo: "option-2" };
+      const mutateData = (x) => (data = x);
+
+      await render(
+        <template>
+          <Form @data={{data}} @onSubmit={{mutateData}} as |form|>
+            <form.Field @name="foo" @title="Foo" @type="select" as |field|>
+              <field.Control as |select|>
+                <select.Option @value="option-1">Option 1</select.Option>
+                <select.Option @value="option-2">Option 2</select.Option>
+                <select.Option @value="option-3">Option 3</select.Option>
+              </field.Control>
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert.deepEqual(data, { foo: "option-2" });
+      assert.form().field("foo").hasValue("option-2");
+
+      await formKit().field("foo").select("option-3");
+
+      assert.form().field("foo").hasValue("option-3");
+
+      await formKit().submit();
+
+      assert.deepEqual(data, { foo: "option-3" });
+    });
+
+    test("selecting none", async function (assert) {
+      let data = { foo: "option-2" };
+      const mutateData = (x) => (data = x);
+
+      await render(
+        <template>
+          <Form @data={{data}} @onSubmit={{mutateData}} as |form|>
+            <form.Field @name="foo" @title="Foo" @type="select" as |field|>
+              <field.Control as |select|>
+                <select.Option @value="option-1">Option 1</select.Option>
+                <select.Option @value="option-2">Option 2</select.Option>
+              </field.Control>
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      await formKit().field("foo").select(NO_VALUE_OPTION);
+
+      assert.form().field("foo").hasValue(NO_VALUE_OPTION);
+
+      await formKit().submit();
+
+      assert.true(
+        Object.hasOwn(data, "foo"),
+        "the key is kept in the submitted data"
+      );
+      assert.strictEqual(
+        data.foo,
+        null,
+        "the value is null, so it survives JSON serialization"
+      );
+    });
+
+    test("@disabled", async function (assert) {
+      await render(
+        <template>
+          <Form as |form|>
+            <form.Field
+              @disabled={{true}}
+              @name="foo"
+              @title="Foo"
+              @type="select"
+              as |field|
+            >
+              <field.Control as |select|>
+                <select.Option @value="option-1">Option 1</select.Option>
+              </field.Control>
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert.dom(".form-kit__control-select").hasAttribute("disabled");
+    });
+
+    test("include none", async function (assert) {
+      await render(
+        <template>
+          <Form as |form|>
+            <form.Field
+              @name="foo"
+              @title="Foo"
+              @type="select"
+              @validation="required"
+              as |field|
+            >
+              <field.Control />
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert
+        .form()
+        .field("foo")
+        .hasValue(NO_VALUE_OPTION, "it has the none when no value is present");
+
+      await render(
+        <template>
+          <Form @data={{hash foo="1"}} as |form|>
+            <form.Field
+              @name="foo"
+              @title="Foo"
+              @type="select"
+              @validation="required"
+              as |field|
+            >
+              <field.Control />
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert
+        .form()
+        .field("foo")
+        .hasNoValue(
+          NO_VALUE_OPTION,
+          "doesn't have the none when value is present"
+        );
+
+      await render(
+        <template>
+          <Form @data={{hash foo="1"}} as |form|>
+            <form.Field @name="foo" @title="Foo" @type="select" as |field|>
+              <field.Control />
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert
+        .form()
+        .field("foo")
+        .hasValue(
+          NO_VALUE_OPTION,
+          "it has the none when value is present and field is not required"
+        );
+
+      await render(
+        <template>
+          <Form as |form|>
+            <form.Field @name="foo" @title="Foo" @type="select" as |field|>
+              <field.Control />
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert
+        .form()
+        .field("foo")
+        .hasValue(
+          NO_VALUE_OPTION,
+          "it has the none when no value is present and field is not required"
+        );
+
+      await render(
+        <template>
+          <Form @data={{hash foo="1"}} as |form|>
+            <form.Field @name="foo" @title="Foo" @type="select" as |field|>
+              <field.Control @includeNone={{false}} />
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert
+        .form()
+        .field("foo")
+        .hasNoValue(
+          NO_VALUE_OPTION,
+          "doesn't have the none for an optional field when value is present and includeNone is false"
+        );
+    });
+  }
+);

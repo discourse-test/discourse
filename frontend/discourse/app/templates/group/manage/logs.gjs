@@ -1,0 +1,63 @@
+import GroupManageLogsFilter from "discourse/components/group-manage-logs-filter";
+import GroupManageLogsRow from "discourse/components/group-manage-logs-row";
+import hideApplicationFooter from "discourse/helpers/hide-application-footer";
+import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
+import DLoadMore from "discourse/ui-kit/d-load-more";
+import { i18n } from "discourse-i18n";
+
+export default <template>
+  {{#unless @controller.model.all_loaded}}
+    {{hideApplicationFooter}}
+  {{/unless}}
+
+  {{#if @controller.model.logs}}
+    <div class="group-manage-logs-controls">
+      <GroupManageLogsFilter
+        @clearFilter={{@controller.clearFilter}}
+        @type="action"
+        @value={{@controller.filters.action}}
+      />
+      <GroupManageLogsFilter
+        @clearFilter={{@controller.clearFilter}}
+        @type="acting_user"
+        @value={{@controller.filters.acting_user}}
+      />
+      <GroupManageLogsFilter
+        @clearFilter={{@controller.clearFilter}}
+        @type="target_user"
+        @value={{@controller.filters.target_user}}
+      />
+      <GroupManageLogsFilter
+        @clearFilter={{@controller.clearFilter}}
+        @type="subject"
+        @value={{@controller.filters.subject}}
+      />
+    </div>
+
+    <DLoadMore @action={{@controller.loadMore}}>
+      <table class="group-manage-logs">
+        <thead>
+          <th>{{i18n "groups.manage.logs.action"}}</th>
+          <th>{{i18n "groups.manage.logs.acting_user"}}</th>
+          <th>{{i18n "groups.manage.logs.target_user"}}</th>
+          <th>{{i18n "groups.manage.logs.subject"}}</th>
+          <th>{{i18n "groups.manage.logs.when"}}</th>
+          <th></th>
+        </thead>
+
+        <tbody>
+          {{#each @controller.model.logs as |logItem|}}
+            <GroupManageLogsRow
+              @filters={{@controller.filters}}
+              @log={{logItem}}
+            />
+          {{/each}}
+        </tbody>
+      </table>
+    </DLoadMore>
+
+    <DConditionalLoadingSpinner @condition={{@controller.loading}} />
+  {{else}}
+    <div>{{i18n "groups.empty.logs"}}</div>
+  {{/if}}
+</template>

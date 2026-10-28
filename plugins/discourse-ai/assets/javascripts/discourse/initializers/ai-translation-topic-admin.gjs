@@ -1,0 +1,74 @@
+import { ajax } from "discourse/lib/ajax";
+import { apiInitializer } from "discourse/lib/api";
+import { i18n } from "discourse-i18n";
+
+/**
+ * Initializer that adds a topic admin menu button for scheduling translations
+ * of untranslated posts in a topic.
+ *
+ * @module ai-translation-topic-admin
+ */
+export default apiInitializer((api) => {
+  const settings = api.container.lookup("service:site-settings");
+
+  if (!settings.discourse_ai_enabled || !settings.ai_translation_enabled) {
+    return;
+  }
+
+  api.addTopicAdminMenuButton((topic) => {
+    const currentUser = api.getCurrentUser();
+
+    if (!currentUser) {
+      return;
+    }
+
+    if (!currentUser.in_any_content_localization_allowed_groups) {
+      return;
+    }
+
+    return {
+      action: async () => {
+        const toasts = api.container.lookup("service:toasts");
+
+        try {
+          const result = await ajax(
+            `/discourse-ai/translate/topics/${topic.id}`,
+            {
+              type: "POST",
+            }
+          );
+          const message =
+            result.scheduled_posts === 0
+              ? i18n(
+                  "discourse_ai.features.translation.schedule_topic_only_success"
+                )
+              : i18n(
+                  "discourse_ai.features.translation.schedule_topic_success",
+                  { count: result.scheduled_posts }
+                );
+
+          toasts.success({
+            duration: "long",
+            data: {
+              message,
+            },
+          });
+        } catch (error) {
+          const errorMessage =
+            error.jqXHR?.responseJSON?.errors?.[0] ||
+            i18n("discourse_ai.features.translation.schedule_topic_error");
+
+          toasts.error({
+            duration: "long",
+            data: {
+              message: errorMessage,
+            },
+          });
+        }
+      },
+      icon: "language",
+      className: "schedule-topic-translations-button",
+      label: "discourse_ai.features.translation.schedule_untranslated",
+    };
+  });
+});

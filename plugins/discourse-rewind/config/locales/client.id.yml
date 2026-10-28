@@ -1,0 +1,26 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+id:
+  js:
+    discourse_rewind:
+      share:
+        toggle_label:
+          private: "Pribadi"
+          public: "Umum"
+      reports:
+        reading_time:
+          title: Waktu bacaan
+        chat_usage:
+          author: Anda
+          author_others: "%{username}"
+        live_usage:
+          minutes:
+            other: "%{count} menit"
+        invites:
+          label_invitations_sent: "Undangan terkirim:"
+        writing_analysis:
+          menu_other: Lainnya

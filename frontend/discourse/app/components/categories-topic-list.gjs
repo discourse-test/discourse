@@ -1,0 +1,53 @@
+import Component from "@glimmer/component";
+import { concat } from "@ember/helper";
+import { service } from "@ember/service";
+import PluginOutlet from "discourse/components/plugin-outlet";
+import LatestTopicListItem from "discourse/components/topic-list/latest-topic-list-item";
+import getUrl from "discourse/lib/get-url";
+import { i18n } from "discourse-i18n";
+
+// Exists so plugins can use it
+export default class CategoriesTopicList extends Component {
+  @service siteSettings;
+
+  <template>
+    <div ...attributes>
+      <div aria-level="2" class="table-heading" role="heading">
+        {{i18n (concat "filters." @filter ".title")}}
+        <PluginOutlet
+          @connectorTagName="div"
+          @name="categories-topics-table-heading"
+        />
+      </div>
+
+      {{#if @topics}}
+        {{#each @topics as |t|}}
+          <LatestTopicListItem @topic={{t}} />
+        {{/each}}
+
+        <div class="more-topics">
+          {{#if
+            (eq
+              this.siteSettings.desktop_category_page_style
+              "categories_and_latest_topics_created_date"
+            )
+          }}
+            <a
+              class="btn btn-default pull-right"
+              href={{getUrl (concat "/" @filter "?order=created")}}
+            >{{i18n "more"}}</a>
+          {{else}}
+            <a
+              class="btn btn-default pull-right"
+              href={{getUrl (concat "/" @filter)}}
+            >{{i18n "more"}}</a>
+          {{/if}}
+        </div>
+      {{else}}
+        <div class="no-topics">
+          <h3>{{i18n (concat "topics.none." @filter)}}</h3>
+        </div>
+      {{/if}}
+    </div>
+  </template>
+}

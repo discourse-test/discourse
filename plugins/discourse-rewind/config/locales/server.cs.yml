@@ -1,0 +1,13 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+cs:
+  site_settings:
+    discourse_rewind_enabled: "Povolit Discourse Ohlédnutí a získat zábavné shrnutí aktivity členů komunity na konci roku."
+  discourse_rewind:
+    invalid_year: "Ohlédnutí lze vygenerovat pouze v lednu nebo prosinci."
+    user_not_found: "Uživatel nebyl nalezen nebo jej nelze zobrazit."
+    cannot_share_when_profile_hidden: "Abyste mohli sdílet Ohlédnutí, musíte povolit ostatním zobrazení vašeho veřejného profilu."

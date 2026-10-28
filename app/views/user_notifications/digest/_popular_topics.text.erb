@@ -1,0 +1,16 @@
+<%- if @popular_topics.present? %>
+  <%= digest_custom_text("above_popular_topics") %>
+  ### <%=t 'user_notifications.digest.popular_topics' %>
+
+  <%- @popular_topics.each_with_index do |t,i| %>
+    <%= raw(@markdown_linker.create(digest_topic_title(t), t.url)) %>
+
+    <%- if @digest_best_posts[t.id].present? %>
+      <%= raw(digest_post_excerpt(@digest_best_posts[t.id])) %>
+    <%- end %>
+
+    <%= digest_custom_text("below_post_#{i+1}") %>
+  <%- end %>
+
+  <%= digest_custom_text("below_popular_topics") %>
+<%- end %>

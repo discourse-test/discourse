@@ -1,0 +1,25 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+sr:
+  js:
+    discourse_rewind:
+      share:
+        toggle_label:
+          private: "Privatna"
+      reports:
+        reading_time:
+          title: Vreme za čitanje
+        chat_usage:
+          author: Ti
+          author_others: "%{username}"
+        live_usage:
+          minutes:
+            one: "%{count} min."
+            few: "%{count} min."
+            other: "%{count} min."
+        writing_analysis:
+          menu_other: Ostalo

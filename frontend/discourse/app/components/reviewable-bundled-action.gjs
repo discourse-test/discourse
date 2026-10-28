@@ -1,0 +1,96 @@
+import Component from "@glimmer/component";
+import { hash } from "@ember/helper";
+import { action } from "@ember/object";
+import { service } from "@ember/service";
+import { dasherize } from "@ember/string";
+import { penaltyEffectDescription } from "discourse/lib/reviewable-penalty";
+import { isRTL } from "discourse/lib/text-direction";
+import DropdownSelectBox from "discourse/select-kit/components/dropdown-select-box";
+import DButton from "discourse/ui-kit/d-button";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+
+export default class ReviewableBundledAction extends Component {
+  @service site;
+
+  get multiple() {
+    return this.args.bundle.actions.length > 1;
+  }
+
+  get bundleActions() {
+    return this.args.bundle.actions.map((bundledAction) => {
+      const effect = penaltyEffectDescription(
+        bundledAction,
+        this.args.authorPenalties
+      );
+
+      if (!effect) {
+        return bundledAction;
+      }
+
+      return {
+        ...bundledAction,
+        description: [bundledAction.description, effect]
+          .filter(Boolean)
+          .join(" "),
+      };
+    });
+  }
+
+  get first() {
+    return this.args.bundle.actions[0];
+  }
+
+  get placement() {
+    const vertical = this.site.mobileView ? "top" : "bottom";
+    const horizontal = isRTL() ? "end" : "start";
+
+    return `${vertical}-${horizontal}`;
+  }
+
+  @action
+  perform(actionName) {
+    if (actionName) {
+      const _action = this.args.bundle.actions.find(
+        (a) => a.action_name === actionName
+      );
+      this.args.performAction(_action);
+    } else {
+      this.args.performAction(this.first);
+    }
+  }
+
+  <template>
+    {{#if this.multiple}}
+      <DropdownSelectBox
+        class={{dConcatClass
+          "reviewable-action-dropdown"
+          "btn-icon-text"
+          (dasherize this.first.action_name)
+          this.first.button_class
+        }}
+        @content={{this.bundleActions}}
+        @nameProperty="label"
+        @onChange={{this.perform}}
+        @options={{hash
+          showCaret=true
+          disabled=@reviewableUpdating
+          placement=this.placement
+          translatedNone=@bundle.label
+        }}
+        @valueProperty="action_name"
+      />
+    {{else}}
+      <DButton
+        class={{dConcatClass
+          "btn-default"
+          "reviewable-action"
+          (dasherize this.first.action_name)
+          this.first.button_class
+        }}
+        @action={{this.perform}}
+        @disabled={{@reviewableUpdating}}
+        @translatedLabel={{this.first.label}}
+      />
+    {{/if}}
+  </template>
+}

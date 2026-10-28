@@ -1,0 +1,65 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { fn } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { isEmpty } from "@ember/utils";
+import withEventValue from "discourse/helpers/with-event-value";
+import DButton from "discourse/ui-kit/d-button";
+import DModal from "discourse/ui-kit/d-modal";
+import DTextField from "discourse/ui-kit/d-text-field";
+import { i18n } from "discourse-i18n";
+
+export default class ScrubRejectedUserModal extends Component {
+  @tracked isScrubbing = false;
+  @tracked scrubReason = "";
+
+  get scrubButtonDisabled() {
+    return isEmpty(this.scrubReason);
+  }
+
+  @action
+  async confirmScrub() {
+    this.isScrubbing = true;
+    await this.args.model.confirmScrub(this.scrubReason);
+    this.args.closeModal();
+  }
+
+  <template>
+    <DModal
+      class="admin-scrub-rejected-user-modal"
+      @bodyClass="scrub-rejected-user"
+      @closeModal={{if this.isScrubbing null @closeModal}}
+      @title={{i18n "review.user.scrub_record.confirm_title"}}
+    >
+      <:body>
+        <p>{{i18n "review.user.scrub_record.confirm_body"}}</p>
+        <label class="scrub-reason-title" for="scrub-reason">{{i18n
+            "review.user.scrub_record.reason_title"
+          }}</label>
+
+        <DTextField
+          class="scrub-reason"
+          id="scrub-reason"
+          @placeholderKey="review.user.scrub_record.reason_placeholder"
+          {{on "input" (withEventValue (fn (mut this.scrubReason)))}}
+        />
+      </:body>
+      <:footer>
+        <DButton
+          class="btn btn-danger"
+          @action={{this.confirmScrub}}
+          @disabled={{this.scrubButtonDisabled}}
+          @isLoading={{this.isScrubbing}}
+          @label="review.user.scrub_record.confirm_button"
+        />
+        <DButton
+          class="btn btn-default"
+          @action={{@closeModal}}
+          @disabled={{this.isScrubbing}}
+          @label="review.user.scrub_record.cancel_button"
+        />
+      </:footer>
+    </DModal>
+  </template>
+}

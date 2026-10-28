@@ -1,0 +1,160 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+nl:
+  admin_js:
+    admin:
+      site_settings:
+        categories:
+          styleguide: "Discourse-stijlgids"
+  js:
+    styleguide:
+      title: "Stijlgids"
+      example:
+        kind:
+          component: "Onderdeel"
+      categories:
+        syntax: Syntax
+        atoms: Atomen
+        molecules: Moleculen
+        organisms: Organismen
+      sections:
+        bem:
+          title: "BEM"
+        typography:
+          title: "Typografie"
+          example: "Welkom bij Discourse"
+          paragraph: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
+        date_time_inputs:
+          title: "Datum-/tijdinvoer"
+        menus:
+          title: "Menu's"
+        context_menu:
+          actions:
+            duplicate: "Dupliceren"
+            delete: "Verwijderen"
+        multi_select:
+          title: "Meervoudige selectie"
+        reorderable_list:
+          policies_pinned: "Vastgemaakt"
+          policies_required: "Vereist"
+          table_field: "Veld"
+          table_type: "Type"
+          cross_list_primary: "Primair"
+        toasts:
+          title: "Toasts"
+        font_scale:
+          title: "Lettertypesysteem"
+        colors:
+          title: "Kleuren"
+        dialog:
+          title: "Dialoog"
+        drag_and_drop:
+          locked: "Vergrendeld"
+        icons:
+          title: "Pictogrammen"
+          full_list: "Zie de volledige lijst van Font Awesome-pictogrammen"
+        forms:
+          title: "Formulieren"
+        buttons:
+          title: "Knoppen"
+        dropdowns:
+          title: "Vervolgkeuzelijsten"
+        categories:
+          title: "Categorieën"
+        bread_crumbs:
+          title: "Broodkruimels"
+        navigation:
+          title: "Navigatie"
+        navigation_bar:
+          title: "Navigatiebalk"
+        navigation_stacked:
+          title: "Navigatie gestapeld"
+        categories_list:
+          title: "Categorieënlijst"
+        topic_link:
+          title: "Topiclink en -status"
+        topic_list_item:
+          title: "Topiclijstitem"
+        topic_statuses:
+          title: "Topicstatussen"
+        topic_list:
+          title: "Topiclijst"
+        basic_topic_list:
+          title: "Basistopicslijst"
+        signup_cta:
+          title: "Registratie-CTA"
+        topic_timer_info:
+          title: "Topictimers"
+        topic_footer_buttons:
+          title: "Knoppen voor topicvoettekst"
+        topic_notifications:
+          title: "Topicmeldingen"
+        post:
+          title: "Bericht"
+        post_list:
+          title: "Berichtenlijst"
+          empty_example: "<PostList /> lege toestand"
+          populated_example: "<PostList /> gevulde toestand"
+        post_oneboxes:
+          title: "Oneboxes plaatsen"
+        topic_map:
+          title: "Topickaart"
+        site_header:
+          title: "Header van de site"
+        more_topics:
+          title: "Meer topics"
+        post_menu:
+          title: "Berichtmenu"
+        roving_focus:
+          toolbar:
+            copy: "Kopiëren"
+          tags:
+            remove: "%{tag} verwijderen"
+            design: "Ontwerp"
+            support: "Steunen"
+          adjacent:
+            label: "Filters"
+            field: "Zoeken"
+            placeholder: "Topics zoeken"
+            open: "Openen"
+            recent: "Recent"
+          listbox:
+            apple: "Apple"
+          combobox:
+            daily: "Dagelijks"
+            weekly: "Wekelijks"
+            monthly: "Maandelijks"
+            never: "Nooit"
+          tree:
+            components: "Onderdelen"
+            select: "Selecteren"
+        docked_composer:
+          title: "Gedockte editor"
+        modal:
+          title: "Modaal"
+          header: "Modaaltitel"
+          footer: "Modaalvoettekst"
+        user_about:
+          title: "Gebruikersinfovak"
+        header_icons:
+          title: "Koptekstpictogrammen"
+        spinners:
+          title: "Kringvelden"
+        otp:
+          title: "OTP"
+        empty_state:
+          title: "Lege toestand"
+        tooltips:
+          title: "Tooltips"
+          description: "Beschrijving"
+          header: "Koptekst"
+          hover_to_see: "Plaats de aanwijzer om een tooltip te zien"
+        char_counter:
+          title: "Tekensteller"
+          placeholder: "Voer hier je tekst in..."
+        segmented_control:
+          title: "Gesegmenteerde bediening (knopschakelgroep)"

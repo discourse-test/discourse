@@ -1,0 +1,420 @@
+import { click, fillIn, render } from "@ember/test-helpers";
+import { module, test } from "qunit";
+import { setupRenderingTest } from "discourse/tests/helpers/component-test";
+import selectKit from "discourse/tests/helpers/select-kit-helper";
+import PollUiBuilder from "discourse/plugins/poll/discourse/components/modal/poll-ui-builder";
+
+async function setupBuilder(poll) {
+  const noop = () => {};
+  const results = [];
+  const model = {
+    toolbarEvent: { getText: () => "", addText: (t) => results.push(t) },
+    poll,
+    onSave: poll ? (attrs) => results.push(attrs) : undefined,
+  };
+
+  await render(
+    <template>
+      <PollUiBuilder @closeModal={{noop}} @inline={{true}} @model={{model}} />
+    </template>
+  );
+
+  return results;
+}
+
+module("Component | PollUiBuilder", function (hooks) {
+  setupRenderingTest(hooks);
+
+  test("editing keeps the settings the builder does not show", async function (assert) {
+    const results = await setupBuilder({
+      name: "existing",
+      type: "regular",
+      optionCount: 2,
+      public: "false",
+      groups: "custom_group",
+      close: "2050-01-01",
+      status: "closed",
+      order: "desc",
+    });
+
+    assert
+      .dom(".poll-options")
+      .doesNotExist("options are edited in the document, not in the builder");
+    assert.dom(".poll-title").doesNotExist("neither is the title");
+    assert
+      .dom(".advanced-mode-btn")
+      .doesNotExist(
+        "every remaining setting is shown, so there is no advanced mode"
+      );
+    assert.dom(".poll-date").exists("the close date is one of them");
+    await click(".insert-poll");
+
+    assert.deepEqual(
+      results[0],
+      {
+        name: "existing",
+        type: "regular",
+        results: null,
+        min: null,
+        max: null,
+        step: null,
+        public: "false",
+        chartType: null,
+        dynamic: null,
+        groups: "custom_group",
+        close: "2050-01-01",
+        status: "closed",
+        order: "desc",
+      },
+      "keeps what it carried and adds no default it lacked"
+    );
+  });
+
+  test("editing writes no attribute that matches its default", async function (assert) {
+    const results = await setupBuilder({ optionCount: 2 });
+
+    await click(".insert-poll");
+
+    assert.deepEqual(
+      results[0],
+      {
+        name: null,
+        type: null,
+        results: null,
+        min: null,
+        max: null,
+        step: null,
+        public: null,
+        chartType: null,
+        dynamic: null,
+        groups: null,
+        close: null,
+        status: null,
+        order: null,
+      },
+      "saving an untouched poll leaves its markdown alone"
+    );
+  });
+
+  test("editing leaves a range the poll did not carry to the options", async function (assert) {
+    const results = await setupBuilder({ type: "multiple", optionCount: 2 });
+
+    await click(".insert-poll");
+
+    assert.strictEqual(
+      results[0].min,
+      null,
+      "writes no minimum, so one option stays enough"
+    );
+    assert.strictEqual(
+      results[0].max,
+      null,
+      "and no maximum, so a later option is still selectable"
+    );
+  });
+
+  test("editing keeps a range the poll spelled out", async function (assert) {
+    const results = await setupBuilder({
+      type: "multiple",
+      optionCount: 3,
+      min: "1",
+      max: "2",
+    });
+
+    await click(".insert-poll");
+
+    assert.strictEqual(results[0].min, "1", "keeps the minimum it carried");
+    assert.strictEqual(results[0].max, "2", "and the maximum");
+  });
+
+  test("editing a number poll leaves its implied range out", async function (assert) {
+    const results = await setupBuilder({ type: "number" });
+
+    await click(".insert-poll");
+
+    assert.strictEqual(results[0].min, null, "writes no minimum");
+    assert.strictEqual(
+      results[0].max,
+      null,
+      "and no maximum, so the range still follows the setting"
+    );
+    assert.strictEqual(results[0].step, null, "nor a step of one");
+  });
+
+  test("editing keeps a number poll's own step", async function (assert) {
+    const results = await setupBuilder({ type: "number", step: "5" });
+
+    await click(".insert-poll");
+
+    assert.strictEqual(results[0].step, "5", "keeps the step it carried");
+  });
+
+  test("a range field cannot be dropped by emptying it", async function (assert) {
+    await setupBuilder({ type: "number", min: "1", max: "5", step: "1" });
+
+    assert.dom(".insert-poll").isEnabled("the poll starts out saveable");
+
+    await fillIn(".poll-options-max", "");
+    assert
+      .dom(".insert-poll")
+      .isDisabled("an empty maximum is refused, not read as having none");
+
+    await fillIn(".poll-options-max", "5");
+    await fillIn(".poll-options-min", "");
+    assert
+      .dom(".insert-poll")
+      .isDisabled("and an empty minimum is not read as zero");
+  });
+
+  test("editing a poll with more options than the site allows", async function (assert) {
+    const results = await setupBuilder({ type: "regular", optionCount: 25 });
+
+    assert
+      .dom(".insert-poll")
+      .isEnabled("the option count belongs to the document, not the builder");
+    await click(".insert-poll");
+
+    assert.strictEqual(results.length, 1, "so the settings still save");
+  });
+
+  test("editing a ranked choice poll leaves range attributes out", async function (assert) {
+    const results = await setupBuilder({
+      type: "ranked_choice",
+      optionCount: 2,
+      min: "3",
+    });
+
+    assert
+      .dom(".insert-poll")
+      .isNotDisabled("a stale range does not block saving a type without one");
+    await click(".insert-poll");
+
+    assert.strictEqual(results[0].min, null, "drops the stale minimum");
+    assert.strictEqual(results[0].max, null, "and writes no maximum");
+  });
+
+  test("Can switch poll type", async function (assert) {
+    await setupBuilder();
+
+    assert.dom(".poll-type-value-regular").hasClass("active");
+
+    await click(".poll-type-value-multiple");
+    assert
+      .dom(".poll-type-value-multiple")
+      .hasClass("active", "can switch to 'multiple' type");
+
+    assert
+      .dom(".poll-type-value-number")
+      .doesNotExist("number type is hidden by default");
+
+    await click(".advanced-mode-btn");
+    assert
+      .dom(".poll-type-value-number")
+      .exists("number type appears in advanced mode");
+
+    await click(".poll-type-value-number");
+    assert
+      .dom(".poll-type-value-number")
+      .hasClass("active", "can switch to 'number' type");
+  });
+
+  test("Automatically updates min/max when number of options change", async function (assert) {
+    await setupBuilder();
+
+    await click(".poll-type-value-multiple");
+    assert.dom(".poll-options-min").hasValue("0");
+    assert.dom(".poll-options-max").hasValue("0");
+
+    await fillIn(".poll-option-value input", "a");
+    assert.dom(".poll-options-min").hasValue("1");
+    assert.dom(".poll-options-max").hasValue("1");
+
+    await click(".poll-option-add");
+
+    await fillIn(".poll-option-value:nth-of-type(2) input", "b");
+    assert.dom(".poll-options-min").hasValue("1");
+    assert.dom(".poll-options-max").hasValue("2");
+  });
+
+  test("disables save button", async function (assert) {
+    this.siteSettings.poll_maximum_options = 3;
+
+    await setupBuilder();
+    assert
+      .dom(".insert-poll")
+      .isDisabled("Insert button disabled when no options specified");
+
+    await fillIn(".poll-option-value input", "   ");
+    assert
+      .dom(".insert-poll")
+      .isDisabled("Insert button disabled for a whitespace-only option");
+
+    await fillIn(".poll-option-value input", "a");
+    assert
+      .dom(".insert-poll")
+      .isEnabled("Insert button enabled once an option is specified");
+
+    await click(".poll-option-add");
+    await fillIn(".poll-option-value:nth-of-type(2) input", "b");
+    await click(".poll-option-add");
+    await fillIn(".poll-option-value:nth-of-type(3) input", "c");
+    await click(".poll-option-add");
+    await fillIn(".poll-option-value:nth-of-type(4) input", "d");
+
+    assert
+      .dom(".insert-poll")
+      .isDisabled("Insert button disabled when too many options");
+  });
+
+  test("number mode", async function (assert) {
+    const results = await setupBuilder();
+
+    await click(".advanced-mode-btn");
+    await click(".poll-type-value-number");
+
+    await click(".insert-poll");
+    assert.strictEqual(
+      results[results.length - 1],
+      "[poll type=number results=always min=1 max=20 step=1 public=true]\n[/poll]\n"
+    );
+
+    await fillIn(".poll-options-step", "2");
+    await click(".insert-poll");
+    assert.strictEqual(
+      results[results.length - 1],
+      "[poll type=number results=always min=1 max=20 step=2 public=true]\n[/poll]\n",
+      "includes step value"
+    );
+
+    await click(".poll-toggle-public");
+    await click(".insert-poll");
+    assert.strictEqual(
+      results[results.length - 1],
+      "[poll type=number results=always min=1 max=20 step=2 public=false]\n[/poll]\n",
+      "can be set to private"
+    );
+
+    await fillIn(".poll-options-step", "0");
+    assert
+      .dom(".insert-poll")
+      .isDisabled("Insert button disabled when step is 0");
+  });
+
+  test("regular mode", async function (assert) {
+    const results = await setupBuilder();
+
+    await fillIn(".poll-option-value input", "a");
+    await click(".poll-option-add");
+    await fillIn(".poll-option-value:nth-of-type(2) input", "b");
+
+    await click(".insert-poll");
+    assert.strictEqual(
+      results[results.length - 1],
+      "[poll type=regular results=always public=true chartType=bar]\n* a\n* b\n[/poll]\n",
+      "has correct output"
+    );
+
+    await click(".advanced-mode-btn");
+
+    await click(".poll-toggle-public");
+
+    await click(".insert-poll");
+    assert.strictEqual(
+      results[results.length - 1],
+      "[poll type=regular results=always public=false chartType=bar]\n* a\n* b\n[/poll]\n",
+      "can be set to private"
+    );
+
+    await click(".poll-toggle-dynamic");
+    await click(".insert-poll");
+    assert.strictEqual(
+      results[results.length - 1],
+      "[poll type=regular results=always public=false chartType=bar dynamic=true]\n* a\n* b\n[/poll]\n",
+      "includes dynamic=true when enabled"
+    );
+
+    await click(".poll-toggle-dynamic");
+    const groupChooser = selectKit(".group-chooser");
+    await groupChooser.expand();
+    await groupChooser.selectRowByName("custom_group");
+    await groupChooser.collapse();
+
+    await click(".insert-poll");
+    assert.strictEqual(
+      results[results.length - 1],
+      "[poll type=regular results=always public=false chartType=bar groups=custom_group]\n* a\n* b\n[/poll]\n",
+      "has groups"
+    );
+  });
+
+  test("multi-choice mode", async function (assert) {
+    const results = await setupBuilder();
+
+    await click(".poll-type-value-multiple");
+
+    await fillIn(".poll-option-value input", "a");
+    await click(".poll-option-add");
+    await fillIn(".poll-option-value:nth-of-type(2) input", "b");
+
+    await click(".insert-poll");
+    assert.strictEqual(
+      results[results.length - 1],
+      "[poll type=multiple results=always min=1 max=2 public=true chartType=bar]\n* a\n* b\n[/poll]\n",
+      "has correct output"
+    );
+
+    await click(".advanced-mode-btn");
+
+    await click(".poll-toggle-public");
+
+    await click(".insert-poll");
+    assert.strictEqual(
+      results[results.length - 1],
+      "[poll type=multiple results=always min=1 max=2 public=false chartType=bar]\n* a\n* b\n[/poll]\n",
+      "can be set to private boolean"
+    );
+  });
+
+  test("staff_only option is not present for non-staff", async function (assert) {
+    await setupBuilder();
+
+    await click(".advanced-mode-btn");
+    const resultVisibility = selectKit(".poll-result");
+
+    assert.strictEqual(resultVisibility.header().value(), "always");
+
+    await resultVisibility.expand();
+    assert.false(
+      resultVisibility.rowByValue("staff_only").exists(),
+      "staff_only is not visible to normal users"
+    );
+    await resultVisibility.collapse();
+
+    this.currentUser.setProperties({ admin: true });
+
+    await resultVisibility.expand();
+    assert.true(
+      resultVisibility.rowByValue("staff_only").exists(),
+      "staff_only is visible to staff"
+    );
+    await resultVisibility.collapse();
+  });
+
+  test("default public value can be controlled with site setting", async function (assert) {
+    this.siteSettings.poll_default_public = false;
+
+    const results = await setupBuilder();
+
+    await fillIn(".poll-option-value input", "a");
+    await click(".poll-option-add");
+    await fillIn(".poll-option-value:nth-of-type(2) input", "b");
+
+    await click(".insert-poll");
+
+    assert.strictEqual(
+      results[results.length - 1],
+      "[poll type=regular results=always public=false chartType=bar]\n* a\n* b\n[/poll]\n",
+      "can be set to private boolean"
+    );
+  });
+});

@@ -1,0 +1,87 @@
+/* eslint-disable ember/no-classic-components, ember/no-observers, ember/require-tagless-components */
+import Component from "@ember/component";
+import { computed, set } from "@ember/object";
+import { observes } from "@ember-decorators/object";
+import List from "discourse/components/topic-list/list";
+import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
+import { i18n } from "discourse-i18n";
+
+export default class BasicTopicList extends Component {
+  init() {
+    super.init(...arguments);
+    const topicList = this.topicList;
+    if (topicList) {
+      this._initFromTopicList(topicList);
+    }
+  }
+
+  @computed("topicList.loadingMore")
+  get loadingMore() {
+    return this.topicList?.loadingMore;
+  }
+
+  set loadingMore(value) {
+    set(this, "topicList.loadingMore", value);
+  }
+
+  @computed("loaded")
+  get loading() {
+    return !this.loaded;
+  }
+
+  @computed("topicList.loaded")
+  get loaded() {
+    let topicList = this.topicList;
+    if (topicList) {
+      return topicList.get("loaded");
+    } else {
+      return true;
+    }
+  }
+
+  @computed("topics")
+  get showUnreadIndicator() {
+    return this.topics.some(
+      (topic) => typeof topic.unread_by_group_member !== "undefined"
+    );
+  }
+
+  @observes("topicList.[]")
+  _topicListChanged() {
+    this._initFromTopicList(this.topicList);
+  }
+
+  _initFromTopicList(topicList) {
+    if (topicList !== null) {
+      this.set("topics", topicList.get("topics"));
+      this.rerender();
+    }
+  }
+
+  <template>
+    <DConditionalLoadingSpinner @condition={{this.loading}}>
+      {{#if this.topics}}
+        <List
+          @ascending={{this.ascending}}
+          @bulkSelectHelper={{this.bulkSelectHelper}}
+          @canBulkSelect={{this.canBulkSelect}}
+          @changeSort={{this.changeSort}}
+          @expandExcerpts={{this.expandExcerpts}}
+          @focusLastVisitedTopic={{this.focusLastVisitedTopic}}
+          @hideCategory={{this.hideCategory}}
+          @listContext={{this.listContext}}
+          @order={{this.order}}
+          @showPosters={{this.showPosters}}
+          @tagsForUser={{this.tagsForUser}}
+          @topics={{this.topics}}
+        />
+      {{else}}
+        {{#unless this.loadingMore}}
+          <div class="alert alert-info">
+            {{i18n "choose_topic.none_found"}}
+          </div>
+        {{/unless}}
+      {{/if}}
+    </DConditionalLoadingSpinner>
+  </template>
+}

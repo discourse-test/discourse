@@ -1,0 +1,111 @@
+/* eslint-disable ember/no-classic-components, ember/no-observers, ember/require-tagless-components */
+import Component from "@ember/component";
+import { computed, set } from "@ember/object";
+import { getOwner } from "@ember/owner";
+import { schedule } from "@ember/runloop";
+import { service } from "@ember/service";
+import { classNameBindings } from "@ember-decorators/component";
+import { observes } from "@ember-decorators/object";
+import ClickTrack from "discourse/lib/click-track";
+import { bind } from "discourse/lib/decorators";
+
+@classNameBindings(
+  "multiSelect",
+  "topic.archetype",
+  "topic.is_warning",
+  "topic.category.read_restricted:read_restricted",
+  "topic.deleted:deleted-topic"
+)
+export default class DiscourseTopic extends Component {
+  @service scrollManager;
+
+  menuVisible = true;
+  SHORT_POST = 1200;
+  dockAt = 0;
+
+  init() {
+    super.init(...arguments);
+    this.appEvents.on("discourse:focus-changed", this, "gotFocus");
+  }
+
+  willDestroy() {
+    super.willDestroy(...arguments);
+
+    // this happens after route exit, stuff could have trickled in
+    this.appEvents.off("discourse:focus-changed", this, "gotFocus");
+  }
+
+  @computed("topic.userFilters")
+  get userFilters() {
+    return this.topic?.userFilters;
+  }
+
+  set userFilters(value) {
+    set(this, "topic.userFilters", value);
+  }
+
+  @computed("topic.postStream")
+  get postStream() {
+    return this.topic?.postStream;
+  }
+
+  set postStream(value) {
+    set(this, "topic.postStream", value);
+  }
+
+  didInsertElement() {
+    super.didInsertElement(...arguments);
+
+    this.scrollManager.bindScrolling(this);
+    window.addEventListener("resize", this.scrolled);
+    this.element.addEventListener("click", this._trackLinkClick);
+  }
+
+  willDestroyElement() {
+    super.willDestroyElement(...arguments);
+
+    this.scrollManager.unbindScrolling(this);
+    window.removeEventListener("resize", this.scrolled);
+
+    // Unbind link tracking
+    this.element.removeEventListener("click", this._trackLinkClick);
+  }
+
+  gotFocus(hasFocus) {
+    if (hasFocus) {
+      this.scrolled();
+    }
+  }
+
+  // The user has scrolled the window, or it is finished rendering and ready for processing.
+  @bind
+  scrolled() {
+    if (this.isDestroying || this._state !== "inDOM") {
+      return;
+    }
+
+    const offset = window.pageYOffset || document.documentElement.scrollTop;
+    this.set("hasScrolled", offset > 0);
+
+    // Trigger a scrolled event
+    this.appEvents.trigger("topic:scrolled", offset);
+  }
+
+  @observes("enteredAt")
+  _enteredTopic() {
+    // Ember is supposed to only call observers when values change but something
+    // in our view set up is firing this observer with the same value. This check
+    // prevents scrolled from being called twice
+    if (this.enteredAt && this.lastEnteredAt !== this.enteredAt) {
+      schedule("afterRender", this.scrolled);
+      this.set("lastEnteredAt", this.enteredAt);
+    }
+  }
+
+  @bind
+  _trackLinkClick(event) {
+    if (event.target.closest(".cooked a, a.track-link")) {
+      ClickTrack.trackClick(event, getOwner(this));
+    }
+  }
+}

@@ -1,0 +1,1291 @@
+# frozen_string_literal: true
+
+class Reviewable < ActiveRecord::Base
+  TYPE_TO_BASIC_SERIALIZER = {
+    ReviewableFlaggedPost: BasicReviewableFlaggedPostSerializer,
+    ReviewableQueuedPost: BasicReviewableQueuedPostSerializer,
+    ReviewableUser: BasicReviewableUserSerializer,
+  }
+
+  UNKNOWN_TYPE_SOURCE = "unknown"
+
+  self.ignored_columns = [:reviewable_by_group_id]
+
+  class UpdateConflict < StandardError
+  end
+
+  class InvalidAction < StandardError
+    def initialize(action_id, klass)
+      @action_id, @klass = action_id, klass
+      super("Can't perform `#{action_id}` on #{klass.name}")
+    end
+  end
+
+  attr_accessor :created_new, :reopened
+  validates :type, :status, :created_by_id, presence: true
+  belongs_to :target, polymorphic: true
+  belongs_to :created_by, class_name: "User"
+  belongs_to :target_created_by, class_name: "User"
+
+  # Optional, for filtering
+  belongs_to :topic
+  belongs_to :category
+
+  has_many :reviewable_histories, dependent: :destroy
+  has_many :reviewable_scores, -> { order(created_at: :desc) }, dependent: :destroy
+  has_many :reviewable_notes, -> { order(created_at: :asc) }, dependent: :destroy
+  has_many :dsa_statement_of_records
+
+  enum :status, { pending: 0, approved: 1, rejected: 2, ignored: 3, deleted: 4 }
+
+  attribute :sensitivity, :integer
+  enum :sensitivity, { disabled: 0, low: 9, medium: 6, high: 3 }, scopes: false, suffix: true
+
+  attribute :priority, :integer
+  enum :priority, { low: 0, medium: 5, high: 10 }, scopes: false, suffix: true
+
+  validates :reject_reason, length: { maximum: 2000 }
+
+  before_save :set_type_source
+
+  after_create { log_history(:created, created_by) }
+
+  after_commit(on: :create) { DiscourseEvent.trigger(:reviewable_created, self) }
+
+  after_commit(on: %i[create update]) do
+    Jobs.enqueue(:notify_reviewable, reviewable_id: id) if pending?
+  end
+
+  # Can be used if several actions are equivalent
+  def self.action_aliases
+    {}
+  end
+
+  # This number comes from looking at forums in the wild and what numbers work.
+  # As the site accumulates real data it'll be based on the site activity instead.
+  def self.typical_sensitivity
+    12.5
+  end
+
+  def self.default_visible
+    where("score >= ?", min_score_for_priority)
+  end
+
+  def self.sti_class_for(type_name)
+    super
+  rescue ActiveRecord::SubclassNotFound
+    Reviewable::UnknownType
+  end
+
+  def self.valid_type?(type)
+    type.to_s.safe_constantize.in?(types)
+  end
+
+  def self.valid_filter_type?(type)
+    valid_type?(type) || custom_filter_type_options.any? { |option| option[:id].to_s == type.to_s }
+  end
+
+  def self.types
+    [ReviewableFlaggedPost, ReviewableQueuedPost, ReviewableUser, ReviewablePost]
+  end
+
+  def self.scrubbable_types
+    [ReviewableUser]
+  end
+
+  def self.sti_names
+    types.map(&:sti_name)
+  end
+
+  def self.source_for(type)
+    type = type.sti_name if type.is_a?(Class)
+    return UNKNOWN_TYPE_SOURCE if Reviewable.sti_names.exclude?(type)
+
+    DiscoursePluginRegistry
+      .reviewable_types_lookup
+      .find { |r| r[:klass].sti_name == type }
+      &.dig(:plugin) || "core"
+  end
+
+  def self.custom_filters
+    @reviewable_filters ||= []
+  end
+
+  def self.custom_filter_type_options
+    (@reviewable_filter_type_options || []) | DiscoursePluginRegistry.reviewable_filter_type_options
+  end
+
+  def self.custom_reason_filter_options
+    registrations =
+      (@reviewable_reason_filter_options || []) |
+        DiscoursePluginRegistry.reviewable_filter_reason_registrations
+
+    registrations.flat_map do |registration|
+      options = registration[:options]
+      options = options.call if options.respond_to?(:call)
+
+      Array(options).map { |option| option.merge(filter: registration[:filter]) }
+    end
+  end
+
+  def self.add_custom_filter(new_filter, type_filter: nil, reason_filters: nil)
+    custom_filters << new_filter
+    if type_filter
+      (@reviewable_filter_type_options ||= []) << type_filter.merge(filter: new_filter.first)
+    end
+    if reason_filters
+      (@reviewable_reason_filter_options ||= []) << {
+        filter: new_filter.first,
+        options: reason_filters,
+      }
+    end
+  end
+
+  def self.clear_custom_filters!
+    @reviewable_filters = []
+    @reviewable_filter_type_options = []
+    @reviewable_reason_filter_options = []
+  end
+
+  def set_type_source
+    self.type_source = Reviewable.source_for(type)
+  end
+
+  def title_for_notification(user)
+    topic&.title.presence || payload&.dig("title").presence ||
+      I18n.t(
+        topic_id ? "js.review.topics.deleted" : "js.review.title",
+        locale: user.effective_locale,
+      )
+  end
+
+  def created_new!
+    self.created_new = true
+    self.topic = target.topic if topic.blank? && target.is_a?(Post)
+    self.target_created_by_id ||= target.is_a?(Post) ? target.user_id : nil
+    self.category_id = topic.category_id if category_id.blank? && topic.present?
+  end
+
+  # Create a new reviewable, or if the target has already been reviewed return it to the
+  # pending state and re-use it.
+  #
+  # You probably want to call this to create your reviewable rather than `.create`.
+  def self.needs_review!(
+    target: nil,
+    topic: nil,
+    created_by:,
+    payload: nil,
+    reviewable_by_moderator: false,
+    potential_spam: true,
+    potentially_illegal: false,
+    target_created_by: nil
+  )
+    reviewable =
+      new(
+        target: target,
+        topic: topic,
+        created_by: created_by,
+        reviewable_by_moderator: reviewable_by_moderator,
+        payload: payload,
+        potential_spam: potential_spam,
+        potentially_illegal: potentially_illegal,
+        target_created_by: target_created_by,
+      )
+    reviewable.created_new!
+
+    if target.blank? || !Reviewable.where(target: target, type: reviewable.type).exists?
+      # If there is no target, or no existing reviewable with matching target and type, there's no chance of a conflict
+      reviewable.save!
+    else
+      # In this case, a reviewable might already exist for this (type, target_id) index.
+      # ActiveRecord can only validate indexes using a SELECT before the INSERT which
+      # is not safe under concurrency. Instead, we perform an UPDATE on the status, and return
+      # the previous value. We then know:
+      #
+      #   a) if a previous row existed
+      #   b) if it was changed
+      #
+      # And that allows us to complete our logic.
+
+      update_args = {
+        status: statuses[:pending],
+        id: target.id,
+        target_type: target.class.polymorphic_name,
+        reviewable_type: reviewable.type,
+        potential_spam: potential_spam == true ? true : nil,
+        potentially_illegal: potentially_illegal == true ? true : nil,
+      }
+
+      row = DB.query_single(<<~SQL, update_args)
+        UPDATE reviewables
+        SET status = :status,
+          potential_spam = COALESCE(:potential_spam, reviewables.potential_spam),
+          potentially_illegal = COALESCE(:potentially_illegal, reviewables.potentially_illegal)
+        FROM reviewables AS old_reviewables
+        WHERE reviewables.target_id = :id
+          AND reviewables.target_type = :target_type
+          AND reviewables.type = :reviewable_type
+          AND old_reviewables.id = reviewables.id
+        RETURNING old_reviewables.status
+      SQL
+      old_status = row[0]
+
+      if old_status.blank?
+        reviewable.save!
+      else
+        reviewable = find_by(target: target)
+
+        if old_status != statuses[:pending]
+          # If we're transitioning back from reviewed to pending, we should recalculate
+          # the score to prevent posts from being hidden.
+          reviewable.recalculate_score(event: :skip)
+          reviewable.log_history(:transitioned, Discourse.system_user)
+          reviewable.reopened = true
+        end
+      end
+    end
+
+    reviewable
+  end
+
+  def add_score(
+    user,
+    reviewable_score_type,
+    reason: nil,
+    created_at: nil,
+    take_action: false,
+    meta_topic_id: nil,
+    force_review: false,
+    context: nil
+  )
+    type_bonus = PostActionType.where(id: reviewable_score_type).pluck(:score_bonus)[0] || 0
+    take_action_bonus = take_action ? 5.0 : 0.0
+    user_accuracy_bonus = ReviewableScore.user_accuracy_bonus(user)
+    sub_total = ReviewableScore.calculate_score(user, type_bonus, take_action_bonus)
+
+    rs =
+      reviewable_scores.new(
+        user: user,
+        status: :pending,
+        reviewable_score_type: reviewable_score_type,
+        score: sub_total,
+        user_accuracy_bonus: user_accuracy_bonus,
+        meta_topic_id: meta_topic_id,
+        take_action_bonus: take_action_bonus,
+        created_at: created_at || Time.zone.now,
+        context: context,
+      )
+    rs.reason = reason.to_s if reason
+    rs.save!
+
+    update(
+      score: score + rs.score,
+      latest_score: rs.created_at,
+      force_review: self.force_review || force_review,
+    )
+    topic.update(reviewable_score: topic.reviewable_score + rs.score) if topic
+
+    # Flags are cached for performance reasons.
+    # However, when the reviewable item is created, we need to clear the cache to mark flag as used.
+    # Used flags cannot be deleted or update by admins, only disabled.
+    Flag.reset_flag_settings! if PostActionType.notify_flag_type_ids.include?(reviewable_score_type)
+
+    if reopened && !take_action
+      DiscourseEvent.trigger(:reviewable_transitioned_to, :pending, self)
+    else
+      DiscourseEvent.trigger(:reviewable_score_updated, self)
+    end
+
+    rs
+  end
+
+  def self.set_priorities(values)
+    values.each do |k, v|
+      id = priorities[k]
+      PluginStore.set("reviewables", "priority_#{id}", v) unless id.nil?
+    end
+  end
+
+  def self.sensitivity_score_value(sensitivity, scale)
+    return Float::MAX if sensitivity == 0
+
+    ratio = sensitivity / sensitivities[:low].to_f
+    high =
+      (PluginStore.get("reviewables", "priority_#{priorities[:high]}") || typical_sensitivity).to_f
+
+    # We want this to be hard to reach
+    ((high.to_f * ratio) * scale).truncate(2)
+  end
+
+  def self.sensitivity_score(sensitivity, scale: 1.0)
+    # If the score is less than the default visibility, bring it up to that level.
+    # Otherwise we have the confusing situation where a post might be hidden and
+    # moderators would never see it!
+    [sensitivity_score_value(sensitivity, scale), min_score_for_priority].max
+  end
+
+  def self.score_to_auto_close_topic
+    sensitivity_score(SiteSetting.auto_close_topic_sensitivity, scale: 2.5)
+  end
+
+  def self.spam_score_to_silence_new_user
+    sensitivity_score(SiteSetting.silence_new_user_sensitivity, scale: 0.6)
+  end
+
+  def self.score_required_to_hide_post
+    sensitivity_score(SiteSetting.hide_post_sensitivity)
+  end
+
+  def self.min_score_for_priority(priority = nil)
+    priority ||= SiteSetting.reviewable_default_visibility
+    id = priorities[priority]
+    return 0.0 if id.nil?
+    PluginStore.get("reviewables", "priority_#{id}").to_f
+  end
+
+  def history
+    reviewable_histories.order(:created_at)
+  end
+
+  def log_history(reviewable_history_type, performed_by, edited: nil)
+    reviewable_histories.create!(
+      reviewable_history_type: reviewable_history_type,
+      status: status,
+      created_by: performed_by,
+      edited: edited,
+    )
+  end
+
+  def self.preload_author_penalties(reviewables)
+    histories = reviewables.flat_map(&:author_penalties).filter_map(&:history)
+    return if histories.empty?
+
+    ActiveRecord::Associations::Preloader.new(records: histories, associations: :acting_user).call
+  end
+
+  def author_penalties
+    @author_penalties ||= AuthorPenalty.all_for(target_created_by, target_post:, reviewable_id: id)
+  end
+
+  def actions_for(guardian, args = nil)
+    args ||= {}
+    built_actions = Actions.new(self, guardian)
+    return built_actions if !can_review_target?(guardian)
+
+    build_actions(built_actions, guardian, args)
+
+    # Empty bundles can cause big issues on the client side, so we remove them
+    # here. It's not valid anyway to have a bundle with no actions, but you can
+    # add a bundle via actions.add_bundle and then not add any actions to it.
+    built_actions.bundles.reject!(&:empty?)
+
+    built_actions
+  end
+
+  def editable_for(guardian, args = nil)
+    args ||= {}
+    EditableFields
+      .new(self, guardian, args)
+      .tap { |fields| build_editable_fields(fields, guardian, args) }
+  end
+
+  # subclasses must implement "build_actions" to list the actions they're capable of
+  def build_actions(actions, guardian, args)
+    raise NotImplementedError
+  end
+
+  # subclasses can implement "build_editable_fields" to list stuff that can be edited
+  def build_editable_fields(actions, guardian, args)
+  end
+
+  def update_fields(params, performed_by, version: nil)
+    return true if params.blank?
+    raise Discourse::InvalidAccess if !can_review_target?(performed_by.guardian)
+
+    (params[:payload] || {}).each { |k, v| payload[k] = v }
+    self.category_id = params[:category_id] if params.has_key?(:category_id)
+
+    result = false
+
+    Reviewable.transaction do
+      increment_version!(version)
+      changes_json = changes.as_json
+      changes_json.delete("version")
+
+      result = save
+      log_history(:edited, performed_by, edited: changes_json) if result
+    end
+
+    result
+  end
+
+  # Delegates to a `perform_#{action_id}` method, which returns a `PerformResult` with
+  # the result of the operation and whether the status of the reviewable changed.
+  def perform(performed_by, action_id, args = nil)
+    args ||= {}
+    perform_method = :"perform_#{aliases[action_id] || action_id}"
+    guardian = args[:guardian] || Guardian.new(performed_by)
+
+    validate_action!(guardian, action_id, perform_method, args)
+
+    affected_candidate_ids =
+      delete_user_action?(action_id) ? pending_reviewable_ids_for_target_user : []
+
+    result = nil
+    update_count = false
+    Reviewable.transaction do
+      increment_version!(args[:version])
+      result = public_send(perform_method, performed_by, args)
+
+      raise ActiveRecord::Rollback unless result.success?
+
+      update_count = transition_to(result.transition_to, performed_by) if result.transition_to
+      update_flag_stats(**result.update_flag_stats) if result.update_flag_stats
+      recalculate_score if result.recalculate_score
+
+      if SiteSetting.dsa_reporting_enabled
+        attributes =
+          dsa_statement_attributes(
+            action_id:,
+            result:,
+            automated_detection: dsa_automated_detection,
+            automated_decision:
+              dsa_automated_decision(
+                performed_by:,
+                decision_automation: args[:decision_automation],
+              ),
+          )
+
+        if attributes
+          DsaStatementOfRecord.create!(
+            reviewable_id: id,
+            payload:
+              attributes.merge(
+                application_date: Date.current.iso8601,
+                territorial_scope: DsaStatementOfRecord::TERRITORIAL_SCOPE,
+                source_type: "SOURCE_VOLUNTARY",
+                decision_ground: "DECISION_GROUND_INCOMPATIBLE_CONTENT",
+              ),
+          )
+        end
+      end
+    end
+
+    result.after_commit.call if result && result.after_commit
+
+    if result&.success? && affected_candidate_ids.present?
+      result.affected_reviewable_ids |= resolved_reviewable_ids(affected_candidate_ids)
+    end
+
+    # An action that leaves the reviewable pending didn't resolve it, so it stays in the queue.
+    result.remove_reviewable_ids -= [id] if pending?
+
+    if update_count || result.remove_reviewable_ids.present?
+      Jobs.enqueue(
+        :notify_reviewable,
+        reviewable_id: id,
+        performing_username: performed_by.username,
+        updated_reviewable_ids: result.remove_reviewable_ids,
+      )
+    end
+
+    notify_users(result, guardian)
+
+    result
+  end
+
+  def updatable_reviewable_scores
+    return reviewable_scores.pending if !rejected?
+
+    reviewable_scores.pending.or(reviewable_scores.disagreed)
+  end
+
+  def transition_to(status_symbol, performed_by)
+    # Claims are held per topic, so one left behind would claim the topic's next reviewable.
+    # Released while still pending so the unclaim is recorded on this reviewable's timeline.
+    if topic_id && pending? && status_symbol.to_sym != :pending
+      ReviewableClaimedTopic.release_manual_claim(topic_id, performed_by)
+    end
+
+    scores = updatable_reviewable_scores
+    self.status = status_symbol
+    save!
+
+    log_history(:transitioned, performed_by)
+    DiscourseEvent.trigger(
+      :reviewable_transitioned_to,
+      status_symbol,
+      self,
+      acting_user: performed_by,
+    )
+
+    if score_status = ReviewableScore.score_transitions[status_symbol]
+      scores.update_all(
+        status: score_status,
+        reviewed_by_id: performed_by.id,
+        reviewed_at: Time.zone.now,
+      )
+    end
+
+    status_previously_changed?(from: "pending")
+  end
+
+  def self.bulk_perform_targets(performed_by, action, type, target_ids, args = nil)
+    args ||= {}
+    viewable_by(performed_by)
+      .where(type: type, target_id: target_ids)
+      .each { |r| r.perform(performed_by, action, args) }
+  end
+
+  def self.with_deleted_content
+    Post.unscoped { Topic.unscoped { PostAction.unscoped { yield } } }
+  end
+
+  def self.viewable_by(user, order: nil, preload: true)
+    return none if user.blank?
+    return none if !user.staff? && !user.category_group_moderator?
+
+    result = self.order(order || "reviewables.score desc, reviewables.created_at desc")
+
+    if preload
+      target_associations = [
+        :user_stat,
+        :primary_email,
+        { topic: :category },
+        :user_histories,
+        :user_custom_fields,
+      ]
+      target_associations << :localizations if SiteSetting.content_localization_enabled
+
+      target_created_by_associations = [:user_custom_fields]
+
+      if SiteSetting.allow_anonymous_mode
+        target_associations << { anonymous_user_master: :master_user }
+        target_created_by_associations << { anonymous_user_master: :master_user }
+      end
+
+      result =
+        result
+          .includes(
+            { created_by: :user_stat },
+            :topic,
+            { target: target_associations },
+            { target_created_by: target_created_by_associations },
+            :reviewable_histories,
+          )
+          .includes(reviewable_scores: { user: :user_stat, meta_topic: :posts })
+          .includes(reviewable_notes: { user: :user_stat })
+    end
+    return result if user.admin?
+
+    group_ids =
+      SiteSetting.enable_category_group_moderation? ? user.group_users.pluck(:group_id) : []
+
+    result =
+      result
+        .left_joins(category: :category_moderation_groups)
+        .where(
+          "(reviewables.reviewable_by_moderator AND :moderator) OR (category_moderation_groups.group_id IN (:group_ids))",
+          moderator: user.moderator?,
+          group_ids: group_ids,
+        )
+        .where(
+          "reviewables.category_id IS NULL OR reviewables.category_id IN (?)",
+          user.guardian.allowed_category_ids,
+        )
+
+    result = exclude_private_messages_hidden_from(result, user)
+    visible_target =
+      user.guardian.reviewable_post_scope.where("posts.id = reviewable_target.id").select(1)
+
+    result.where(<<~SQL)
+      NOT EXISTS (
+        SELECT 1 FROM posts reviewable_target
+        WHERE reviewables.target_type = 'Post'
+          AND reviewable_target.id = reviewables.target_id
+          AND NOT EXISTS (#{visible_target.to_sql})
+      )
+    SQL
+  end
+
+  def self.exclude_private_messages_hidden_from(result, user)
+    visible_private_message =
+      user
+        .guardian
+        .private_message_topic_scope(Topic.unscoped.where("topics.id = private_message.id"))
+        .select(1)
+
+    result.where(<<~SQL, private_message: Archetype.private_message)
+        NOT EXISTS (
+          SELECT 1
+          FROM topics private_message
+          WHERE private_message.id = reviewables.topic_id
+            AND private_message.archetype = :private_message
+            AND NOT EXISTS (#{visible_private_message.to_sql})
+        )
+      SQL
+  end
+  private_class_method :exclude_private_messages_hidden_from
+
+  def self.pending_count(user)
+    list_for(user).count
+  end
+
+  def self.unseen_reviewable_count(user)
+    unseen_list_for(user).count
+  end
+
+  def self.list_for(
+    user,
+    ids: nil,
+    status: :pending,
+    category_id: nil,
+    topic_id: nil,
+    type: nil,
+    limit: nil,
+    offset: nil,
+    priority: nil,
+    username: nil,
+    reviewed_by: nil,
+    claimed_by: nil,
+    sort_order: nil,
+    from_date: nil,
+    to_date: nil,
+    additional_filters: {},
+    preload: true,
+    include_claimed_by_others: true,
+    flagged_by: nil,
+    score_type: nil
+  )
+    order =
+      case sort_order
+      when "score_asc"
+        "reviewables.score ASC, reviewables.created_at DESC"
+      when "created_at"
+        "reviewables.created_at DESC, reviewables.score DESC"
+      when "created_at_asc"
+        "reviewables.created_at ASC, reviewables.score DESC"
+      else
+        "reviewables.score DESC, reviewables.created_at DESC"
+      end
+
+    if username.present?
+      user_id = User.find_by_username(username)&.id
+      return none if user_id.blank?
+    end
+    return none if user.blank?
+
+    result = viewable_by(user, order: order, preload: preload)
+    result = by_status(result, status)
+    result = result.where(id: ids) if ids
+    if type
+      custom_type = custom_filter_type_options.find { |option| option[:id].to_s == type.to_s }
+      if custom_type
+        result = apply_custom_filter(result, custom_type[:filter], custom_type[:value])
+      else
+        result = result.where("reviewables.type = ?", Reviewable.sti_class_for(type).sti_name)
+      end
+    end
+    result = result.where("reviewables.category_id = ?", category_id) if category_id
+    result = result.where("reviewables.topic_id = ?", topic_id) if topic_id
+    result = result.where("reviewables.created_at >= ?", from_date) if from_date
+    result = result.where("reviewables.created_at <= ?", to_date) if to_date
+
+    if flagged_by
+      flagged_by_id = User.find_by_username(flagged_by)&.id
+      return none if flagged_by_id.nil?
+      result = result.where(<<~SQL, flagged_by_id: flagged_by_id)
+        EXISTS(
+          SELECT 1 FROM reviewable_scores
+          WHERE reviewable_scores.reviewable_id = reviewables.id AND reviewable_scores.user_id = :flagged_by_id
+        )
+      SQL
+    end
+
+    if score_type
+      custom_score_type =
+        custom_reason_filter_options.find { |option| option[:id].to_s == score_type.to_s }
+      if custom_score_type
+        result = apply_custom_filter(result, custom_score_type[:filter], custom_score_type[:value])
+      else
+        score_type = score_type.to_i
+        result = result.where(<<~SQL, score_type: score_type)
+          EXISTS(
+            SELECT 1 FROM reviewable_scores
+            WHERE reviewable_scores.reviewable_id = reviewables.id AND reviewable_scores.reviewable_score_type = :score_type
+          )
+        SQL
+      end
+    end
+
+    if reviewed_by
+      reviewed_by_id = User.find_by_username(reviewed_by)&.id
+      return none if reviewed_by_id.nil?
+
+      result = result.joins(<<~SQL)
+        INNER JOIN(
+          SELECT reviewable_id
+          FROM reviewable_histories
+          WHERE reviewable_history_type = #{ReviewableHistory.types[:transitioned]} AND
+          status <> #{statuses[:pending]} AND created_by_id = #{reviewed_by_id}
+        ) AS rh ON rh.reviewable_id = reviewables.id
+      SQL
+    end
+
+    if claimed_by
+      claimed_by_id = User.find_by_username(claimed_by)&.id
+      return none if claimed_by_id.nil?
+
+      result = result.joins(<<~SQL)
+        INNER JOIN reviewable_claimed_topics rct_filter
+        ON rct_filter.topic_id = reviewables.topic_id
+      SQL
+      result = result.where("rct_filter.user_id = ?", claimed_by_id)
+    end
+
+    min_score = min_score_for_priority(priority)
+
+    if min_score > 0 && status == :pending
+      result = result.where("reviewables.score >= ? OR reviewables.force_review", min_score)
+    elsif min_score > 0
+      result = result.where("reviewables.score >= ?", min_score)
+    end
+
+    if !custom_filters.empty?
+      result =
+        custom_filters.reduce(result) do |memo, filter|
+          key = filter.first
+          filter_query = filter.last
+
+          next(memo) unless additional_filters[key]
+          filter_query.call(memo, additional_filters[key])
+        end
+    end
+
+    # If a reviewable doesn't have a target, allow us to filter on who created that reviewable.
+    # A ReviewableQueuedPost may have a target_created_by_id even before a target get's assigned
+    if user_id
+      result =
+        result.where(
+          "(reviewables.target_id IS NULL AND reviewables.created_by_id = :user_id)
+        OR (reviewables.target_created_by_id = :user_id)",
+          user_id: user_id,
+        )
+    end
+
+    if !include_claimed_by_others
+      result =
+        result.joins(
+          "LEFT JOIN reviewable_claimed_topics rct ON reviewables.topic_id = rct.topic_id",
+        ).where("rct.user_id IS NULL OR rct.user_id = ?", user.id)
+    end
+    result = result.where(type: Reviewable.sti_names)
+    result = result.limit(limit) if limit
+    result = result.offset(offset) if offset
+    result
+  end
+
+  def self.apply_custom_filter(result, key, value)
+    filter = custom_filters.find { |registered_filter| registered_filter.first == key }
+    filter ? filter.last.call(result, value) : result
+  end
+  private_class_method :apply_custom_filter
+
+  def self.unseen_list_for(user, preload: true, limit: nil)
+    results = list_for(user, preload: preload, limit: limit, include_claimed_by_others: false)
+    if user.last_seen_reviewable_id
+      results = results.where("reviewables.id > ?", user.last_seen_reviewable_id)
+    end
+    results
+  end
+
+  def self.user_menu_list_for(user, limit: 30)
+    list_for(user, limit:, status: :pending, include_claimed_by_others: false, preload: false).to_a
+  end
+
+  def self.basic_serializers_for_list(reviewables, user)
+    reviewables.map { |r| r.basic_serializer.new(r, scope: user.guardian, root: nil) }
+  end
+
+  def serializer
+    self.class.serializer_for(self)
+  end
+
+  def basic_serializer
+    TYPE_TO_BASIC_SERIALIZER[type.to_sym] || BasicReviewableSerializer
+  end
+
+  def type_class
+    Reviewable.sti_class_for(type)
+  end
+
+  def self.lookup_serializer_for(type)
+    "#{type}Serializer".constantize
+  rescue NameError
+    ReviewableSerializer
+  end
+
+  def self.serializer_for(reviewable)
+    type = reviewable.type
+    @@serializers ||= {}
+    @@serializers[type] ||= lookup_serializer_for(type)
+  end
+
+  def create_result(status, transition_to = nil)
+    result = PerformResult.new(self, status)
+    result.transition_to = transition_to
+    yield result if block_given?
+    result
+  end
+
+  def notify_users(result, guardian)
+    group_ids = Set.new([Group::AUTO_GROUPS[:staff]])
+
+    if SiteSetting.enable_category_group_moderation? && category
+      group_ids.merge(category.moderating_group_ids)
+    end
+
+    data = ReviewablePerformResultSerializer.new(result, root: false, scope: guardian).as_json
+
+    MessageBus.publish("/reviewable_action", data, group_ids: group_ids.to_a)
+  end
+
+  def self.scores_with_topics
+    ReviewableScore.joins(reviewable: :topic).where("reviewables.type = ?", name)
+  end
+
+  def self.count_by_date(start_date, end_date, category_id = nil, include_subcategories = false)
+    query =
+      scores_with_topics.where("reviewable_scores.created_at BETWEEN ? AND ?", start_date, end_date)
+
+    if category_id
+      if include_subcategories
+        query = query.where("topics.category_id IN (?)", Category.subcategory_ids(category_id))
+      else
+        query = query.where("topics.category_id = ?", category_id)
+      end
+    end
+
+    query
+      .group("date(reviewable_scores.created_at)")
+      .order("date(reviewable_scores.created_at)")
+      .count
+  end
+
+  def explain_score
+    DB.query(<<~SQL, reviewable_id: id)
+      SELECT rs.reviewable_id,
+        rs.user_id,
+        CASE WHEN (u.admin OR u.moderator) THEN 5.0 ELSE u.trust_level END AS trust_level_bonus,
+        us.flags_agreed,
+        us.flags_disagreed,
+        us.flags_ignored,
+        rs.score,
+        rs.user_accuracy_bonus,
+        rs.take_action_bonus,
+        COALESCE(pat.score_bonus, 0.0) AS type_bonus
+      FROM reviewable_scores AS rs
+      INNER JOIN users AS u ON u.id = rs.user_id
+      LEFT OUTER JOIN user_stats AS us ON us.user_id = rs.user_id
+      LEFT OUTER JOIN post_action_types AS pat ON pat.id = rs.reviewable_score_type
+        WHERE rs.reviewable_id = :reviewable_id
+    SQL
+  end
+
+  def recalculate_score(event: :trigger)
+    # pending/agreed scores count
+    sql = <<~SQL
+      UPDATE reviewables
+      SET score = COALESCE((
+        SELECT sum(score)
+        FROM reviewable_scores AS rs
+        WHERE rs.reviewable_id = :id
+          AND rs.status IN (:pending, :agreed)
+      ), 0.0)
+      WHERE id = :id
+      RETURNING score
+    SQL
+
+    result =
+      DB.query(
+        sql,
+        id: id,
+        pending: ReviewableScore.statuses[:pending],
+        agreed: ReviewableScore.statuses[:agreed],
+      )
+
+    # Update topic score
+    sql = <<~SQL
+      UPDATE topics
+      SET reviewable_score = COALESCE((
+        SELECT SUM(score)
+        FROM reviewables AS r
+        WHERE r.topic_id = :topic_id
+          AND r.status IN (:pending, :approved)
+      ), 0.0)
+      WHERE id = :topic_id
+    SQL
+
+    DB.query(
+      sql,
+      topic_id: topic_id,
+      pending: self.class.statuses[:pending],
+      approved: self.class.statuses[:approved],
+    )
+
+    self.score = result[0].score
+    clear_attribute_changes([:score])
+
+    DiscourseEvent.trigger(:reviewable_score_updated, self) if event == :trigger
+
+    score
+  end
+
+  # The account that the delete user actions destroy. Subclasses that delete a
+  # different account must override this, otherwise the confirmation prompt will
+  # name the wrong user.
+  def target_user
+    target_type == "User" ? target : target_created_by
+  end
+
+  def delete_user_actions(actions, bundle = nil, require_reject_reason: false)
+    bundle ||=
+      actions.add_bundle(
+        "#{id}-reject_user",
+        icon: "user-xmark",
+        label: "reviewables.actions.reject_user.title",
+      )
+
+    # The reject reason modal already acts as a confirmation step, so only ask
+    # for a separate confirmation when it isn't shown.
+    username = target_user&.username
+    confirmable = !require_reject_reason && username.present?
+
+    actions.add(:delete_user, bundle: bundle) do |a|
+      a.icon = "user-xmark"
+      a.label = "reviewables.actions.reject_user.delete.title"
+      a.description = "reviewables.actions.reject_user.delete.description"
+      a.require_reject_reason = require_reject_reason
+      if confirmable
+        a.confirm_message = "reviewables.actions.reject_user.delete.confirm"
+        a.confirm_message_args = { username: username }
+        a.confirm_destructive = true
+      end
+    end
+
+    actions.add(:delete_user_block, bundle: bundle) do |a|
+      a.icon = "ban"
+      a.label = "reviewables.actions.reject_user.block.title"
+      a.require_reject_reason = require_reject_reason
+      a.description = "reviewables.actions.reject_user.block.description"
+      if confirmable
+        a.confirm_message = "reviewables.actions.reject_user.block.confirm"
+        a.confirm_message_args = { username: username }
+        a.confirm_destructive = true
+      end
+    end
+  end
+
+  protected
+
+  def increment_version!(version = nil)
+    version_result = nil
+
+    if version
+      version_result =
+        DB.query_single(
+          "UPDATE reviewables SET version = version + 1 WHERE id = :id AND version = :version RETURNING version",
+          version: version,
+          id: id,
+        )
+    else
+      # We didn't supply a version to update safely, so just increase it
+      version_result =
+        DB.query_single(
+          "UPDATE reviewables SET version = version + 1 WHERE id = :id RETURNING version",
+          id: id,
+        )
+    end
+
+    if version_result && version_result[0]
+      self.version = version_result[0]
+    else
+      raise UpdateConflict.new
+    end
+  end
+
+  def self.by_status(partial_result, status)
+    return partial_result if status == :all
+
+    if status == :reviewed
+      partial_result.where(status: statuses.except(:pending).values)
+    else
+      partial_result.where(status: statuses[status])
+    end
+  end
+
+  def self.find_by_flagger_or_queued_post_creator(id:, user_id:)
+    Reviewable.find_by(
+      "id = :id AND (created_by_id = :user_id
+       OR (target_created_by_id = :user_id AND type = 'ReviewableQueuedPost'))",
+      id: id,
+      user_id: user_id,
+    )
+  end
+
+  def self.unknown_types_and_sources
+    @known_sources ||= Reviewable.sti_names.map { |n| [n, Reviewable.source_for(n)] }
+
+    known_unknowns = Reviewable.pending.distinct.pluck(:type, :type_source) - @known_sources
+
+    known_unknowns
+      .map { |type, source| { type: type, source: source } }
+      .sort_by { |e| [e[:source] == UNKNOWN_TYPE_SOURCE ? 1 : 0, e[:source], e[:type]] }
+  end
+
+  def self.destroy_unknown_types!
+    Reviewable.pending.where.not(type: Reviewable.sti_names).delete_all
+  end
+
+  private
+
+  # Returns the DSA statement attributes for a successfully completed action.
+  #
+  # Override in subclasses to declare each action's decision and subject metadata.
+  # Return nil when the action should not produce a statement.
+  #
+  # Called inside the moderation transaction after the action and reviewable updates
+  # succeed, when the dsa_reporting_enabled site setting is enabled. A hash creates
+  # one pending statement.
+  # Failure to save the statement rolls back the transaction.
+  #
+  # Keys must be symbols. Each hash must include :content_type, :content_date,
+  # :automated_detection, :automated_decision, :decision_facts, and at least one
+  # decision field.
+  #
+  # * :decision_facts [String] Required. Facts and circumstances known when the action
+  #   succeeds. Maximum 5000 characters. Core actions use fixed English wording.
+  #
+  # Decision fields:
+  #
+  # * :decision_visibility [Array<String>] One or more of:
+  #   * DECISION_VISIBILITY_CONTENT_REMOVED
+  #   * DECISION_VISIBILITY_CONTENT_DISABLED
+  #   * DECISION_VISIBILITY_CONTENT_DEMOTED
+  #   * DECISION_VISIBILITY_CONTENT_AGE_RESTRICTED
+  #   * DECISION_VISIBILITY_CONTENT_INTERACTION_RESTRICTED
+  #   * DECISION_VISIBILITY_CONTENT_LABELLED
+  #   * DECISION_VISIBILITY_OTHER
+  # * :decision_visibility_other [String] Required for DECISION_VISIBILITY_OTHER.
+  #   Maximum 500 characters.
+  # * :decision_account [String] One of:
+  #   * DECISION_ACCOUNT_SUSPENDED
+  #   * DECISION_ACCOUNT_TERMINATED
+  # * :decision_provision [String] One of:
+  #   * DECISION_PROVISION_PARTIAL_SUSPENSION
+  #   * DECISION_PROVISION_TOTAL_SUSPENSION
+  #   * DECISION_PROVISION_PARTIAL_TERMINATION
+  #   * DECISION_PROVISION_TOTAL_TERMINATION
+  # * :decision_monetary [String] One of:
+  #   * DECISION_MONETARY_SUSPENSION
+  #   * DECISION_MONETARY_TERMINATION
+  #   * DECISION_MONETARY_OTHER
+  # * :decision_monetary_other [String] Required for DECISION_MONETARY_OTHER.
+  #   Maximum 500 characters.
+  #
+  # Subject fields:
+  #
+  # * :content_type [Array<String>] Required. One or more of:
+  #   * CONTENT_TYPE_APP
+  #   * CONTENT_TYPE_AUDIO
+  #   * CONTENT_TYPE_IMAGE
+  #   * CONTENT_TYPE_PRODUCT
+  #   * CONTENT_TYPE_SYNTHETIC_MEDIA
+  #   * CONTENT_TYPE_TEXT
+  #   * CONTENT_TYPE_VIDEO
+  #   * CONTENT_TYPE_OTHER
+  # * :content_type_other [String] Required when :content_type includes
+  #   CONTENT_TYPE_OTHER. Maximum 500 characters. Use "User account" for accounts.
+  # * :content_date [String] Required. Subject creation date in YYYY-MM-DD format,
+  #   on or after 2000-01-01. Use the account creation date for account subjects.
+  # * :content_language [String] Optional. Uppercase ISO 639-1 language code.
+  #
+  # Restriction expiry fields, in YYYY-MM-DD format:
+  #
+  # * :end_date_visibility_restriction [String]
+  # * :end_date_account_restriction [String]
+  # * :end_date_service_restriction [String]
+  # * :end_date_monetary_restriction [String]
+  #
+  # These fields are optional. Omit them for an indefinite restriction.
+  # Each expiry must be on or after the application date.
+  #
+  # Automation fields:
+  #
+  # * :automated_detection [String] Required. "Yes" or "No", indicating whether
+  #   automated means identified the content.
+  # * :automated_decision [String] Required. One of:
+  #   * AUTOMATED_DECISION_FULLY
+  #   * AUTOMATED_DECISION_PARTIALLY
+  #   * AUTOMATED_DECISION_NOT_AUTOMATED
+  #
+  # Multiple decision fields may describe the same action. Reviewable#perform
+  # supplies :application_date, :territorial_scope, :source_type, and :decision_ground.
+  # The decision ground is DECISION_GROUND_INCOMPATIBLE_CONTENT.
+  # Pending statements receive their contractual ground, category, and supporting
+  # explanation during human classification.
+  #
+  # @param action_id [Symbol] Requested action ID, before alias resolution.
+  # @param result [Reviewable::PerformResult] Successful action result, including
+  #   :deleted_user or :removed_avatar when returned by the action.
+  # @param automated_detection [String] Computed detection value: "Yes" or "No".
+  # @param automated_decision [String] Computed AUTOMATED_DECISION_* value.
+  # @return [Hash{Symbol => String, Array<String>}, nil] Statement attributes,
+  #   or nil when no statement applies.
+  # @example Report a human decision on a manually flagged post
+  #   def dsa_statement_attributes(action_id:, result:, automated_detection:, automated_decision:)
+  #     return unless action_id == :agree_and_edit
+  #
+  #     {
+  #       decision_visibility: ["DECISION_VISIBILITY_OTHER"],
+  #       decision_visibility_other: "Content edited",
+  #       decision_facts: "The flagged post was edited.",
+  #       content_type: ["CONTENT_TYPE_TEXT"],
+  #       content_date: post.created_at.to_date.iso8601,
+  #       automated_detection:,
+  #       automated_decision:,
+  #     }
+  #   end
+  def dsa_statement_attributes(action_id:, result:, automated_detection:, automated_decision:)
+    nil
+  end
+
+  def dsa_automated_detection
+    automated =
+      reviewable_scores.where(
+        user_id: Discourse::SYSTEM_USER_ID,
+        reason: %w[watched_word fast_typer auto_silence_regex email_spam suspect_user],
+      ).exists?
+
+    if DiscoursePluginRegistry.apply_modifier(:reviewable_automated_detection, automated, self)
+      "Yes"
+    else
+      "No"
+    end
+  end
+
+  def dsa_automated_decision(performed_by:, decision_automation:)
+    return "AUTOMATED_DECISION_PARTIALLY" if decision_automation == :partial
+    return "AUTOMATED_DECISION_FULLY" if decision_automation == :full || !performed_by.human?
+
+    "AUTOMATED_DECISION_NOT_AUTOMATED"
+  end
+
+  def can_review_target?(guardian)
+    post = target_post
+    !post || guardian.can_review_post?(post)
+  end
+
+  def target_post
+    return if target_type != "Post"
+
+    @post ||= target || Post.with_deleted.find_by(id: target_id)
+  end
+
+  def delete_user_action?(action_id)
+    resolved_action = (aliases[action_id] || action_id).to_sym
+    %i[delete_user delete_and_block_user delete_user_block].include?(resolved_action)
+  end
+
+  def pending_reviewable_ids_for_target_user
+    user = target_created_by || (target if target_type == "User")
+    return [] if user.blank?
+
+    Reviewable
+      .pending
+      .where(target_created_by: user)
+      .or(Reviewable.pending.where(target: user))
+      .where.not(id: id)
+      .pluck(:id)
+  end
+
+  def resolved_reviewable_ids(candidate_ids)
+    candidate_ids - Reviewable.pending.where(id: candidate_ids).pluck(:id)
+  end
+
+  def aliases
+    self.class.action_aliases
+  end
+
+  def validate_action!(guardian, action_id, perform_method, args)
+    # Support this action or any aliases
+    action_aliases = [action_id, aliases.to_a.select { |k, v| v == action_id }.map(&:first)].flatten
+
+    # Ensure the user has access to the action
+    actions = actions_for(guardian, args)
+
+    if action_aliases.none? { |a| actions.has?(a) } || !respond_to?(perform_method)
+      raise InvalidAction.new(action_id, self.class)
+    end
+  end
+
+  def update_flag_stats(status:, user_ids:)
+    return if %i[agreed disagreed ignored].exclude?(status)
+
+    # Don't count self-flags
+    user_ids -= [post&.user_id]
+    return if user_ids.blank?
+
+    result = DB.query(<<~SQL, user_ids: user_ids)
+      UPDATE user_stats
+      SET flags_#{status} = flags_#{status} + 1
+      WHERE user_id IN (:user_ids)
+      RETURNING user_id, flags_agreed + flags_disagreed + flags_ignored AS total
+    SQL
+
+    user_ids =
+      result.select { |r| r.total > Jobs::TruncateUserFlagStats.truncate_to }.map(&:user_id)
+    return if user_ids.blank?
+
+    Jobs.enqueue(:truncate_user_flag_stats, user_ids: user_ids)
+  end
+end
+
+# == Schema Information
+#
+# Table name: reviewables
+#
+#  id                      :bigint           not null, primary key
+#  force_review            :boolean          default(FALSE), not null
+#  latest_score            :datetime
+#  payload                 :json
+#  potential_spam          :boolean          default(FALSE), not null
+#  potentially_illegal     :boolean          default(FALSE)
+#  reject_reason           :text
+#  reviewable_by_moderator :boolean          default(FALSE), not null
+#  score                   :float            default(0.0), not null
+#  status                  :integer          default("pending"), not null
+#  target_type             :string
+#  type                    :string           not null
+#  type_source             :string           default("unknown"), not null
+#  version                 :integer          default(0), not null
+#  created_at              :datetime         not null
+#  updated_at              :datetime         not null
+#  category_id             :integer
+#  created_by_id           :integer          not null
+#  target_created_by_id    :integer
+#  target_id               :integer
+#  topic_id                :integer
+#
+# Indexes
+#
+#  idx_reviewables_score_desc_created_at_desc                  (score DESC,created_at DESC)
+#  index_reviewables_on_reviewable_by_group_id                 (reviewable_by_group_id)
+#  index_reviewables_on_status_and_created_at                  (status,created_at)
+#  index_reviewables_on_status_and_score                       (status,score)
+#  index_reviewables_on_status_and_type                        (status,type)
+#  index_reviewables_on_target_created_by_id                   (target_created_by_id)
+#  index_reviewables_on_target_id_where_post_type_eq_post      (target_id) WHERE ((target_type)::text = 'Post'::text)
+#  index_reviewables_on_topic_id_and_status_and_created_by_id  (topic_id,status,created_by_id)
+#  index_reviewables_on_type_and_target_id                     (type,target_id) UNIQUE
+#

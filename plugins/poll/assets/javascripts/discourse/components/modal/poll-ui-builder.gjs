@@ -1,0 +1,761 @@
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { Textarea } from "@ember/component";
+import { fn } from "@ember/helper";
+import { on } from "@ember/modifier";
+import { action } from "@ember/object";
+import { trackedObject } from "@ember/reactive/collections";
+import { service } from "@ember/service";
+import { isBlank } from "@ember/utils";
+import AdvancedModeToggle from "discourse/components/advanced-mode-toggle";
+import withEventValue from "discourse/helpers/with-event-value";
+import { removeValueFromArray } from "discourse/lib/array-tools";
+import { AUTO_GROUPS } from "discourse/lib/constants";
+import { buildBBCodeAttrs } from "discourse/lib/text";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
+import ComboBox from "discourse/select-kit/components/combo-box";
+import GroupChooser from "discourse/select-kit/components/group-chooser";
+import DButton from "discourse/ui-kit/d-button";
+import DDateTimeInput from "discourse/ui-kit/d-date-time-input";
+import DInputTip from "discourse/ui-kit/d-input-tip";
+import DModal from "discourse/ui-kit/d-modal";
+import DRadioButton from "discourse/ui-kit/d-radio-button";
+import DToggleSwitch from "discourse/ui-kit/d-toggle-switch";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import dAutoFocus from "discourse/ui-kit/modifiers/d-auto-focus";
+import { i18n } from "discourse-i18n";
+import generateCurrentDateMarkup from "discourse/plugins/discourse-local-dates/lib/generate-current-date-markup" with {
+  discourseImport: "optional",
+};
+import {
+  ALWAYS_POLL_RESULT,
+  BAR_CHART_TYPE,
+  MULTIPLE_POLL_TYPE,
+  NUMBER_POLL_TYPE,
+  PIE_CHART_TYPE,
+  pollAttrsFromSettings,
+  RANKED_CHOICE_POLL_TYPE,
+  REGULAR_POLL_TYPE,
+} from "discourse/plugins/poll/lib/poll-settings";
+
+export {
+  BAR_CHART_TYPE,
+  PIE_CHART_TYPE,
+  REGULAR_POLL_TYPE,
+  NUMBER_POLL_TYPE,
+  MULTIPLE_POLL_TYPE,
+  RANKED_CHOICE_POLL_TYPE,
+} from "discourse/plugins/poll/lib/poll-settings";
+
+const VOTE_POLL_RESULT = "on_vote";
+const CLOSED_POLL_RESULT = "on_close";
+const STAFF_POLL_RESULT = "staff_only";
+
+export default class PollUiBuilderModal extends Component {
+  @service currentUser;
+  @service site;
+  @service siteSettings;
+
+  @tracked chartType = BAR_CHART_TYPE;
+  @tracked dynamic = false;
+  @tracked pollAutoClose;
+  @tracked pollGroups;
+  @tracked pollMax = 2;
+  @tracked pollMin = 1;
+  @tracked pollOptionsText = "";
+  @tracked pollResult = ALWAYS_POLL_RESULT;
+  @tracked pollStep = 1;
+  @tracked pollTitle;
+  @tracked pollType = REGULAR_POLL_TYPE;
+  @tracked publicPoll = this.siteSettings.poll_default_public;
+  @tracked showAdvanced = false;
+  @autoTrackedArray pollOptions = [trackedObject({ value: "" })];
+
+  constructor() {
+    super(...arguments);
+
+    const poll = this.args.model.poll;
+    if (poll) {
+      this.pollType = poll.type || REGULAR_POLL_TYPE;
+      this.chartType = poll.chartType || BAR_CHART_TYPE;
+      this.dynamic = poll.dynamic === "true";
+      this.pollAutoClose = poll.close ? moment(poll.close) : null;
+      this.pollGroups = poll.groups?.split(",");
+      this.pollMin = Number(poll.min ?? 1);
+      this.pollMax = Number(
+        poll.max ??
+          (this.isNumber
+            ? this.siteSettings.poll_maximum_options
+            : poll.optionCount)
+      );
+      this.pollStep = Number(poll.step ?? 1);
+      this.pollResult = poll.results || ALWAYS_POLL_RESULT;
+      this.publicPoll = poll.public === "true";
+      this.showAdvanced = true;
+    }
+  }
+
+  get isEditing() {
+    return !!this.args.model.poll;
+  }
+
+  get showTitle() {
+    return this.showAdvanced && !this.isEditing;
+  }
+
+  get showOptions() {
+    return !this.isNumber && !this.isEditing;
+  }
+
+  get showNumber() {
+    return this.showAdvanced || this.isNumber;
+  }
+
+  get showRankedChoice() {
+    return this.showAdvanced || this.isRankedChoice;
+  }
+
+  get rankedChoiceOrRegular() {
+    return this.isRankedChoice || this.isRegular;
+  }
+
+  get rankedChoiceOrNumber() {
+    return this.isRankedChoice || this.isNumber;
+  }
+
+  get canRemoveOption() {
+    return this.pollOptions.length > 1;
+  }
+
+  get pollResults() {
+    const options = [
+      {
+        name: i18n("poll.ui_builder.poll_result.always"),
+        value: ALWAYS_POLL_RESULT,
+      },
+      {
+        name: i18n("poll.ui_builder.poll_result.vote"),
+        value: VOTE_POLL_RESULT,
+      },
+      {
+        name: i18n("poll.ui_builder.poll_result.closed"),
+        value: CLOSED_POLL_RESULT,
+      },
+    ];
+
+    if (this.currentUser.staff) {
+      options.push({
+        name: i18n("poll.ui_builder.poll_result.staff"),
+        value: STAFF_POLL_RESULT,
+      });
+    }
+
+    return options;
+  }
+
+  get isRegular() {
+    return this.pollType === REGULAR_POLL_TYPE;
+  }
+
+  get isNumber() {
+    return this.pollType === NUMBER_POLL_TYPE;
+  }
+
+  get isMultiple() {
+    return this.pollType === MULTIPLE_POLL_TYPE;
+  }
+
+  get isRankedChoice() {
+    return this.pollType === RANKED_CHOICE_POLL_TYPE;
+  }
+
+  get pollOptionsCount() {
+    return this.isEditing
+      ? this.args.model.poll.optionCount
+      : this.pollOptions.filter((option) => option.value.trim()).length;
+  }
+
+  get siteGroups() {
+    // prevents group "everyone" to be listed
+    return this.site.groups.filter((g) => g.id !== AUTO_GROUPS.everyone.id);
+  }
+
+  get hasRange() {
+    return this.isMultiple || this.isNumber;
+  }
+
+  get isPie() {
+    return (
+      this.pollType !== NUMBER_POLL_TYPE && this.chartType === PIE_CHART_TYPE
+    );
+  }
+
+  get #pollOutput() {
+    const pollAttrs = this.#pollAttrs;
+    const existingPolls = this.args.model.toolbarEvent
+      .getText()
+      .match(/\[poll(\s+name=[^\s\]]+)*.*\]/gim);
+    if (existingPolls) {
+      pollAttrs.name = `poll${existingPolls.length + 1}`;
+    }
+
+    const attrs = buildBBCodeAttrs(pollAttrs);
+    const title = this.pollTitle ? `# ${this.pollTitle.trim()}\n` : "";
+    const options = this.isNumber
+      ? ""
+      : this.pollOptions
+          .map((option) => option.value.trim())
+          .filter(Boolean)
+          .map((option) => `* ${option}\n`)
+          .join("");
+
+    return `[poll${attrs ? ` ${attrs}` : ""}]\n${title}${options}[/poll]\n`;
+  }
+
+  get #pollAttrs() {
+    return pollAttrsFromSettings(
+      {
+        pollType: this.pollType,
+        chartType: this.chartType,
+        dynamic: this.dynamic,
+        pollAutoClose: this.pollAutoClose,
+        pollGroups: this.pollGroups,
+        pollMin: this.pollMin,
+        pollMax: this.pollMax,
+        pollStep: this.pollStep,
+        pollResult: this.pollResult,
+        publicPoll: this.publicPoll,
+      },
+      {
+        originalAttrs: this.args.model.poll,
+        optionCount: this.pollOptionsCount,
+        maximumOptions: this.siteSettings.poll_maximum_options,
+      }
+    );
+  }
+
+  get minNumOfOptionsValidation() {
+    // Option counts are edited in the document, not in this settings modal.
+    if (!this.isNumber && !this.isEditing) {
+      if (this.pollOptionsCount < 1) {
+        return {
+          failed: true,
+          reason: i18n("poll.ui_builder.help.options_min_count"),
+        };
+      }
+
+      if (this.pollOptionsCount > this.siteSettings.poll_maximum_options) {
+        return {
+          failed: true,
+          reason: i18n("poll.ui_builder.help.options_max_count", {
+            count: this.siteSettings.poll_maximum_options,
+          }),
+        };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  get showMinNumOfOptionsValidation() {
+    return this.pollOptions.length !== 1 || this.pollOptions[0].value !== "";
+  }
+
+  get minMaxValueValidation() {
+    if (!this.hasRange) {
+      return { ok: true };
+    }
+
+    const pollMin = parseInt(this.pollMin, 10) || 0;
+    const pollMax = parseInt(this.pollMax, 10) || 0;
+    const pollStep = parseInt(this.pollStep, 10) || 0;
+
+    if (isBlank(this.pollMin) || pollMin < 0) {
+      return {
+        failed: true,
+        reason: i18n("poll.ui_builder.help.invalid_min_value"),
+      };
+    }
+
+    if (
+      isBlank(this.pollMax) ||
+      pollMax < 0 ||
+      (this.isMultiple && pollMax > this.pollOptionsCount)
+    ) {
+      return {
+        failed: true,
+        reason: i18n("poll.ui_builder.help.invalid_max_value"),
+      };
+    }
+
+    if (pollMin > pollMax) {
+      return {
+        failed: true,
+        reason: i18n("poll.ui_builder.help.invalid_values"),
+      };
+    }
+
+    if (this.isNumber) {
+      if (pollStep < 1) {
+        return {
+          failed: true,
+          reason: i18n("poll.ui_builder.help.min_step_value"),
+        };
+      }
+
+      const optionsCount = (pollMax - pollMin + 1) / pollStep;
+
+      if (optionsCount < 1) {
+        return {
+          failed: true,
+          reason: i18n("poll.ui_builder.help.options_min_count"),
+        };
+      }
+
+      if (optionsCount > this.siteSettings.poll_maximum_options) {
+        return {
+          failed: true,
+          reason: i18n("poll.ui_builder.help.options_max_count", {
+            count: this.siteSettings.poll_maximum_options,
+          }),
+        };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  get disableInsert() {
+    return !this.minMaxValueValidation.ok || !this.minNumOfOptionsValidation.ok;
+  }
+
+  @action
+  onChangePollMin(event) {
+    this.pollMin = event.target.value;
+    this.#enforceMinMaxValues();
+  }
+
+  @action
+  onChangePollMax(event) {
+    this.pollMax = event.target.value;
+    this.#enforceMinMaxValues();
+  }
+
+  @action
+  onOptionsTextChange(event) {
+    this.pollOptions = event.target.value
+      .split("\n")
+      .map((value) => trackedObject({ value }));
+    this.#enforceMinMaxValues();
+  }
+
+  @action
+  insertPoll() {
+    if (this.args.model.onSave) {
+      this.args.model.onSave(this.#pollAttrs);
+    } else {
+      this.args.model.toolbarEvent.addText(this.#pollOutput);
+    }
+    this.args.closeModal();
+  }
+
+  @action
+  toggleAdvanced() {
+    this.showAdvanced = !this.showAdvanced;
+    if (this.showAdvanced) {
+      this.pollOptionsText = this.pollOptions.map((x) => x.value).join("\n");
+    }
+  }
+
+  @action
+  updateValue(option, event) {
+    option.value = event.target.value;
+    this.#enforceMinMaxValues();
+  }
+
+  @action
+  onInputKeydown(option, index, event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.target.value !== "") {
+        this.addOption(index + 1);
+      }
+      return;
+    }
+
+    if (
+      event.code === "Period" &&
+      event.shiftKey &&
+      (event.metaKey || event.ctrlKey) &&
+      this.siteSettings.discourse_local_dates_enabled
+    ) {
+      if (!generateCurrentDateMarkup) {
+        return;
+      }
+
+      event.preventDefault();
+      const timezone = this.currentUser.user_option?.timezone;
+      const markup = generateCurrentDateMarkup(timezone);
+
+      const input = event.target;
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
+      const value = option.value || "";
+
+      option.value = value.slice(0, start) + markup + value.slice(end);
+      this.#enforceMinMaxValues();
+
+      requestAnimationFrame(() => {
+        input.setSelectionRange(start + markup.length, start + markup.length);
+      });
+    }
+  }
+
+  @action
+  addOption(atIndex) {
+    if (atIndex === -1) {
+      atIndex = this.pollOptions.length;
+    }
+
+    const option = trackedObject({ value: "" });
+    this.pollOptions.splice(atIndex, 0, option);
+    this.#enforceMinMaxValues();
+  }
+
+  @action
+  removeOption(option) {
+    removeValueFromArray(this.pollOptions, option);
+    this.#enforceMinMaxValues();
+  }
+
+  @action
+  updatePollType(pollType, event) {
+    event?.preventDefault();
+    if (pollType === NUMBER_POLL_TYPE && !this.isNumber) {
+      this.pollMax = this.siteSettings.poll_maximum_options;
+    }
+    this.pollType = pollType;
+    this.#enforceMinMaxValues();
+  }
+
+  @action
+  togglePublic() {
+    this.publicPoll = !this.publicPoll;
+  }
+
+  #enforceMinMaxValues() {
+    if (this.isMultiple) {
+      if (
+        this.pollMin <= 0 ||
+        this.pollMin >= this.pollMax ||
+        this.pollMin >= this.pollOptionsCount
+      ) {
+        this.pollMin = this.pollOptionsCount > 0 ? 1 : 0;
+      }
+
+      if (
+        this.pollMax <= 0 ||
+        this.pollMin >= this.pollMax ||
+        this.pollMax > this.pollOptionsCount
+      ) {
+        this.pollMax = this.pollOptionsCount;
+      }
+    }
+  }
+
+  _comboboxOptions(startIndex, endIndex) {
+    return [...Array(endIndex - startIndex).keys()].map((number) => ({
+      value: number + startIndex,
+      name: number + startIndex,
+    }));
+  }
+
+  <template>
+    <DModal
+      class="poll-ui-builder"
+      @closeModal={{@closeModal}}
+      @inline={{@inline}}
+      @title={{i18n
+        (if @model.poll "poll.ui_builder.edit" "poll.ui_builder.title")
+      }}
+    >
+      <:body>
+        <ul class="nav nav-pills poll-type">
+          <li>
+            <DButton
+              class={{dConcatClass
+                "poll-type-value poll-type-value-regular"
+                (if this.isRegular "active")
+              }}
+              @action={{fn this.updatePollType "regular"}}
+            >
+              {{i18n "poll.ui_builder.poll_type.regular"}}
+            </DButton>
+          </li>
+          <li>
+            <DButton
+              class={{dConcatClass
+                "poll-type-value poll-type-value-multiple"
+                (if this.isMultiple "active")
+              }}
+              @action={{fn this.updatePollType "multiple"}}
+            >
+              {{i18n "poll.ui_builder.poll_type.multiple"}}
+            </DButton>
+          </li>
+          {{#if this.showNumber}}
+            <li>
+              <DButton
+                class={{dConcatClass
+                  "poll-type-value poll-type-value-number"
+                  (if this.isNumber "active")
+                }}
+                @action={{fn this.updatePollType "number"}}
+              >
+                {{i18n "poll.ui_builder.poll_type.number"}}
+              </DButton>
+            </li>
+          {{/if}}
+          {{#if this.showRankedChoice}}
+            <li>
+              <DButton
+                class={{dConcatClass
+                  "poll-type-value poll-type-value-ranked-choice"
+                  (if this.isRankedChoice "active")
+                }}
+                @action={{fn this.updatePollType "ranked_choice"}}
+              >
+                {{i18n "poll.ui_builder.poll_type.ranked_choice"}}
+              </DButton>
+            </li>
+          {{/if}}
+        </ul>
+
+        {{#if this.showTitle}}
+          <div class="input-group poll-title">
+            <label class="input-group-label">{{i18n
+                "poll.ui_builder.poll_title.label"
+              }}</label>
+            <input
+              type="text"
+              value={{this.pollTitle}}
+              {{on "input" (withEventValue (fn (mut this.pollTitle)))}}
+            />
+          </div>
+        {{/if}}
+
+        {{#if this.showOptions}}
+          <div class="poll-options">
+            {{#if this.showAdvanced}}
+              <label class="input-group-label">{{i18n
+                  "poll.ui_builder.poll_options.label"
+                }}</label>
+              <Textarea
+                @value={{this.pollOptionsText}}
+                {{on "input" this.onOptionsTextChange}}
+              />
+              {{#if this.showMinNumOfOptionsValidation}}
+                {{#unless this.minNumOfOptionsValidation.ok}}
+                  <DInputTip @validation={{this.minNumOfOptionsValidation}} />
+                {{/unless}}
+              {{/if}}
+            {{else}}
+              {{#each this.pollOptions as |option index|}}
+                <div class="input-group poll-option-value">
+                  <input
+                    type="text"
+                    value={{option.value}}
+                    {{dAutoFocus}}
+                    {{on "input" (fn this.updateValue option)}}
+                    {{on "keydown" (fn this.onInputKeydown option index)}}
+                  />
+                  {{#if this.canRemoveOption}}
+                    <DButton
+                      @action={{fn this.removeOption option}}
+                      @icon="trash-can"
+                    />
+                  {{/if}}
+                </div>
+              {{/each}}
+
+              <div class="poll-option-controls">
+                <DButton
+                  class="btn-default poll-option-add"
+                  @action={{fn this.addOption -1}}
+                  @icon="plus"
+                  @label="poll.ui_builder.poll_options.add"
+                />
+                {{#if
+                  (and
+                    this.showMinNumOfOptionsValidation
+                    (not this.minNumOfOptionsValidation.ok)
+                  )
+                }}
+                  <DInputTip @validation={{this.minNumOfOptionsValidation}} />
+                {{/if}}
+              </div>
+            {{/if}}
+          </div>
+        {{/if}}
+
+        {{#unless this.rankedChoiceOrRegular}}
+          <div class="options">
+            <div class="input-group poll-number">
+              <label class="input-group-label">{{i18n
+                  "poll.ui_builder.poll_config.min"
+                }}</label>
+              <input
+                class="poll-options-min"
+                min="1"
+                type="number"
+                value={{this.pollMin}}
+                {{on "input" this.onChangePollMin}}
+              />
+            </div>
+
+            <div class="input-group poll-number">
+              <label class="input-group-label">{{i18n
+                  "poll.ui_builder.poll_config.max"
+                }}</label>
+              <input
+                class="poll-options-max"
+                min="1"
+                type="number"
+                value={{this.pollMax}}
+                {{on "input" this.onChangePollMax}}
+              />
+            </div>
+
+            {{#if this.isNumber}}
+              <div class="input-group poll-number">
+                <label class="input-group-label">{{i18n
+                    "poll.ui_builder.poll_config.step"
+                  }}</label>
+                <input
+                  class="poll-options-step"
+                  min="1"
+                  type="number"
+                  value={{this.pollStep}}
+                  {{on "input" (withEventValue (fn (mut this.pollStep)))}}
+                />
+              </div>
+            {{/if}}
+          </div>
+
+          {{#unless this.minMaxValueValidation.ok}}
+            <DInputTip @validation={{this.minMaxValueValidation}} />
+          {{/unless}}
+        {{/unless}}
+
+        <div class="input-group poll-public">
+          <DToggleSwitch
+            class="poll-toggle-public"
+            @label="poll.ui_builder.poll_public.label"
+            @state={{this.publicPoll}}
+            {{on "click" this.togglePublic}}
+          />
+        </div>
+
+        {{#if this.showAdvanced}}
+          <div class="input-group poll-dynamic">
+            <DToggleSwitch
+              class="poll-toggle-dynamic"
+              @label="poll.ui_builder.poll_dynamic.label"
+              @state={{this.dynamic}}
+              {{on "click" (fn (mut this.dynamic) (not this.dynamic))}}
+            />
+          </div>
+          <div class="input-group poll-allowed-groups">
+            <label class="input-group-label">{{i18n
+                "poll.ui_builder.poll_groups.label"
+              }}</label>
+            <GroupChooser
+              @content={{this.siteGroups}}
+              @labelProperty="name"
+              @onChange={{fn (mut this.pollGroups)}}
+              @value={{this.pollGroups}}
+              @valueProperty="name"
+            />
+          </div>
+
+          <div class="input-group poll-date">
+            <label class="input-group-label">{{i18n
+                "poll.ui_builder.automatic_close.label"
+              }}</label>
+            <DDateTimeInput
+              @clearable={{true}}
+              @date={{this.pollAutoClose}}
+              @onChange={{fn (mut this.pollAutoClose)}}
+              @useGlobalPickerContainer={{true}}
+            />
+          </div>
+
+          <div class="input-group poll-select">
+            <label class="input-group-label">{{i18n
+                "poll.ui_builder.poll_result.label"
+              }}</label>
+            <ComboBox
+              class="poll-result"
+              @content={{this.pollResults}}
+              @onChange={{fn (mut this.pollResult)}}
+              @value={{this.pollResult}}
+              @valueProperty="value"
+            />
+          </div>
+
+          {{#unless this.rankedChoiceOrNumber}}
+            <div class="input-group poll-select column">
+              <label class="input-group-label">{{i18n
+                  "poll.ui_builder.poll_chart_type.label"
+                }}</label>
+
+              <div class="radio-group">
+                <DRadioButton
+                  @id="poll-chart-type-bar"
+                  @name="poll-chart-type"
+                  @selection={{this.chartType}}
+                  @value="bar"
+                />
+                <label for="poll-chart-type-bar">{{dIcon "chart-bar"}}
+                  {{i18n "poll.ui_builder.poll_chart_type.bar"}}</label>
+              </div>
+
+              <div class="radio-group">
+                <DRadioButton
+                  @id="poll-chart-type-pie"
+                  @name="poll-chart-type"
+                  @selection={{this.chartType}}
+                  @value="pie"
+                />
+                <label for="poll-chart-type-pie">{{dIcon "chart-pie"}}
+                  {{i18n "poll.ui_builder.poll_chart_type.pie"}}</label>
+              </div>
+            </div>
+          {{/unless}}
+        {{/if}}
+      </:body>
+      <:footer>
+        <DButton
+          class="btn-primary insert-poll"
+          @action={{this.insertPoll}}
+          @disabled={{this.disableInsert}}
+          @icon="chart-bar"
+          @label={{if @model.poll "save" "poll.ui_builder.insert"}}
+        />
+
+        <DButton class="btn-flat" @action={{@closeModal}} @label="cancel" />
+
+        {{#unless this.isEditing}}
+          <AdvancedModeToggle
+            @active={{this.showAdvanced}}
+            @onToggle={{this.toggleAdvanced}}
+          />
+        {{/unless}}
+
+      </:footer>
+    </DModal>
+  </template>
+}

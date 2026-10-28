@@ -1,0 +1,15 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+lt:
+  discourse_reactions:
+    discourse_workflows:
+      post_reaction:
+        cannot_react: "%{username} negali reaguoti į šį įrašą."
+  reports:
+    reactions:
+      labels:
+        day: "Diena"

@@ -1,0 +1,22 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+th:
+  js:
+    discourse_rewind:
+      share:
+        toggle_label:
+          private: "ส่วนตัว"
+          public: "สาธารณะ"
+      reports:
+        chat_usage:
+          author: คุณ
+          author_others: "%{username}"
+        live_usage:
+          minutes:
+            other: "%{count} นาที"
+        writing_analysis:
+          menu_other: อื่นๆ

@@ -1,0 +1,18 @@
+# WARNING: Never edit this file.
+# It will be overwritten when translations are pulled from Crowdin.
+#
+# To work with us on translations, join this project:
+# https://translate.discourse.org/
+
+en_GB:
+  discourse_ai:
+    ai_bot:
+      navigation:
+        categories:
+          title: "Categories"
+      read_post:
+        unknown_post: "post"
+      chat_tool_approval:
+        category_fields:
+          description: "description"
+          color: "colour"
