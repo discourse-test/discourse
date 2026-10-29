@@ -281,6 +281,12 @@ gem "rrule"
 
 gem "dry-initializer", "~> 3.1"
 
+# Framework and progress reporting for script/disco and the commands plugins add to it.
+source "https://rubygems.pkg.github.com/discourse-test" do
+  gem "discourse-disco-cli", require: false
+  gem "mini_progress", require: false
+end
+
 gem "parallel"
 gem "tty-prompt", require: false
 

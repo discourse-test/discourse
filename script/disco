@@ -1,0 +1,56 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Discourse's command line tools. Plugins add commands in `disco/register.rb`,
+# registering their command classes by name.
+
+ENV["BUNDLE_GEMFILE"] ||= File.expand_path("../Gemfile", __dir__)
+require "bundler/setup"
+require "discourse_disco_cli"
+
+root = File.expand_path("..", __dir__)
+plugins_dir = File.join(root, "plugins")
+
+# Plugin command classes come from the plugins' gems. Activating them doesn't
+# need Rails, so this picks the plugins the way a boot does.
+activate_plugin_gems = -> do
+  require_relative "../lib/version"
+  require_relative "../lib/version_compatibility"
+  require_relative "../lib/plugin/metadata"
+  require_relative "../lib/plugin_gem"
+
+  plugin =
+    Struct.new(:metadata, :directory) do
+      def directory_name
+        File.basename(directory)
+      end
+    end
+  plugins =
+    Dir[File.join(plugins_dir, "*/plugin.rb")].sort.filter_map do |path|
+      metadata = Plugin::Metadata.parse(File.read(path))
+      needed = metadata.required_version || Discourse::VERSION::STRING
+      next if !Discourse.has_needed_version?(Discourse::VERSION::STRING, needed)
+
+      plugin.new(metadata, File.dirname(path))
+    end
+  PluginGem.activate_gemfiles(plugins)
+end
+
+if ENV["LOAD_PLUGINS"] != "0"
+  DiscourseDisco::CLI::Registry.with_defaults(loader: activate_plugin_gems) do
+    Dir[File.join(plugins_dir, "*/disco/register.rb")].sort.each { |path| require path }
+  end
+end
+
+DiscourseDisco::CLI::ExceptionHandler.handle_and_exit do
+  DiscourseDisco::CLI::Bootstrap.run(
+    ARGV,
+    program_name: "script/disco",
+    description: "Discourse command line tools",
+    boot_rails: -> do
+      # rubocop:disable Discourse/NoChdir
+      Dir.chdir(root) { require File.join(root, "config/environment") }
+      # rubocop:enable Discourse/NoChdir
+    end,
+  )
+end

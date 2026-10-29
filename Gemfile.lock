@@ -134,6 +134,10 @@ GEM
     colored2 (4.0.3)
     concurrent-ruby (1.3.8)
     connection_pool (2.5.5)
+    console (1.38.0)
+      fiber-annotation
+      fiber-local (~> 1.1)
+      json
     cose (1.3.1)
       cbor (~> 0.5.9)
       openssl-signature_algorithm (~> 1.0)
@@ -197,6 +201,10 @@ GEM
     ffi (1.17.4-x86_64-darwin)
     ffi (1.17.4-x86_64-linux-gnu)
     ffi (1.17.4-x86_64-linux-musl)
+    fiber-annotation (0.2.0)
+    fiber-local (1.1.0)
+      fiber-storage
+    fiber-storage (1.0.1)
     globalid (1.4.0)
       activesupport (>= 6.1)
     goldiloader (6.0.0)
@@ -630,6 +638,8 @@ GEM
       logger
     ruby2_keywords (0.0.5)
     rubyzip (3.7.0)
+    samovar (2.5.1)
+      console (~> 1.0)
     sanitize (7.0.0)
       crass (~> 1.0.2)
       nokogiri (>= 1.16.8)
@@ -745,6 +755,17 @@ GEM
       mini_mime
       multipart-post (~> 2.0)
 
+GEM
+  remote: https://rubygems.pkg.github.com/discourse-test/
+  specs:
+    discourse-disco-cli (0.3.0)
+      colored2 (>= 4.0)
+      samovar (>= 2.5)
+    mini_progress (0.1.0)
+      activesupport (>= 7.1)
+      i18n (>= 1.8)
+      unicode-display_width (>= 3.0)
+
 PLATFORMS
   aarch64-linux
   aarch64-linux-gnu
@@ -790,6 +811,7 @@ DEPENDENCIES
   debug (>= 1.0.0)
   diffy
   digest
+  discourse-disco-cli!
   discourse-emojis
   discourse-fonts
   discourse-seed-fu
@@ -833,6 +855,7 @@ DEPENDENCIES
   message_bus
   messageformat-wrapper
   mini_mime
+  mini_progress!
   mini_racer
   mini_scheduler
   mini_sql
@@ -968,6 +991,7 @@ CHECKSUMS
   colored2 (4.0.3) sha256=63e1038183976287efc43034f5cca17fb180b4deef207da8ba78d051cbce2b37
   concurrent-ruby (1.3.8) sha256=b2f1be836e968ccc78ccfce277ea79c72a88633f22306782c16ff23fb415d1e1
   connection_pool (2.5.5) sha256=e54ff92855753df1fd7c59fa04a398833355f27dd14c074f8c83a05f72a716ad
+  console (1.38.0) sha256=35b82f59130e95e9be6b832d9e539c8b3988fc192e4a8e9a86ab4922f44ad5de
   cose (1.3.1) sha256=d5d4dbcd6b035d513edc4e1ab9bc10e9ce13b4011c96e3d1b8fe5e6413fd6de5
   cppjieba_rb (0.4.4) sha256=319a7ab57b6ec28a8d1b223487ecd114432f1930d7740db2f99c1991e6c8faaf
   crack (1.0.1) sha256=ff4a10390cd31d66440b7524eb1841874db86201d5b70032028553130b6d4c7e
@@ -979,6 +1003,7 @@ CHECKSUMS
   diff-lcs (1.6.2) sha256=9ae0d2cba7d4df3075fe8cd8602a8604993efc0dfa934cff568969efb1909962
   diffy (3.4.4) sha256=79384ab5ca82d0e115b2771f0961e27c164c456074bd2ec46b637ebf7b6e47e3
   digest (3.3.0) sha256=4444251235d992671247bd14d88683bd328bbfea8ca026e22cb87d0a205fb4c4
+  discourse-disco-cli (0.3.0) sha256=06009cb92f617a7120cdbafe92dc624949bdff54867f3fa77e95c739f621a049
   discourse-emojis (1.0.47) sha256=83430f5c6705a2b19540790fdde5ee87921d69918f88885e9bafdfd4c43c5adc
   discourse-fonts (0.0.19) sha256=78d4ddd671615908303a675427039d8d787c935e6deae184c6e143c18c6e0033
   discourse-seed-fu (2.3.12) sha256=4f61d95c11ed54609046cd04eb3a51b531c5fa863fa86d1bea7d74264e5c75e4
@@ -1007,6 +1032,9 @@ CHECKSUMS
   ffi (1.17.4-x86_64-darwin) sha256=aa70390523cf3235096cf64962b709b4cfbd5c082a2cb2ae714eb0fe2ccda496
   ffi (1.17.4-x86_64-linux-gnu) sha256=9d3db14c2eae074b382fa9c083fe95aec6e0a1451da249eab096c34002bc752d
   ffi (1.17.4-x86_64-linux-musl) sha256=3fdf9888483de005f8ef8d1cf2d3b20d86626af206cbf780f6a6a12439a9c49e
+  fiber-annotation (0.2.0) sha256=7abfadf1d119f508867d4103bf231c0354d019cc39a5738945dec2edadaf6c03
+  fiber-local (1.1.0) sha256=c885f94f210fb9b05737de65d511136ea602e00c5105953748aa0f8793489f06
+  fiber-storage (1.0.1) sha256=f48e5b6d8b0be96dac486332b55cee82240057065dc761c1ea692b2e719240e1
   globalid (1.4.0) sha256=037f12fbf1d9d7a014d501c2d5c77356fd4ddd96d7a7991d6700bba96706f427
   goldiloader (6.0.0) sha256=613db1b28e9964291255a67a521f04d481b6afd6b9ca56ea1a612fd86e9a89c7
   google-protobuf (4.36.2-aarch64-linux-gnu) sha256=c3279ec6eaa59f6ed6276eda2a33cffb4306471183ab79a332e698b8564f5169
@@ -1063,6 +1091,7 @@ CHECKSUMS
   mime-types (3.7.0) sha256=dcebf61c246f08e15a4de34e386ebe8233791e868564a470c3fe77c00eed5e56
   mime-types-data (3.2026.1013) sha256=370f152f2a47e54e58829766492ea2cbe130a45358374b8788a6a8ad4e961c96
   mini_mime (1.1.5) sha256=8681b7e2e4215f2a159f9400b5816d85e9d8c6c6b491e96a12797e798f8bccef
+  mini_progress (0.1.0) sha256=f80b9fe92601d21b9c743ce237747b04ce6e67ca691a6d655cb9e622ea437ea0
   mini_racer (0.22.1) sha256=c0a7baa4035fe57488bf9856bdafb657c99997cbe0441b1838cfd886fe21518a
   mini_scheduler (0.20.0) sha256=bd8948228bf4a48a603a8e20de850d16b68295413d8651c8c05288f4c6997b05
   mini_sql (1.6.0) sha256=5296637f6a4af5bb43e06788037e9a2968ff9c8eb65928befcba8cb41f42d6ee
@@ -1189,6 +1218,7 @@ CHECKSUMS
   ruby-vips (2.3.0) sha256=e685ec02c13969912debbd98019e50492e12989282da5f37d05f5471442f5374
   ruby2_keywords (0.0.5) sha256=ffd13740c573b7301cf7a2e61fc857b2a8e3d3aff32545d6f8300d8bae10e3ef
   rubyzip (3.7.0) sha256=65c19294da75297a939006f3516deacc33185fbd721ff1954f7a231db6d3e121
+  samovar (2.5.1) sha256=8a9fc41eb8868084f0321eb41678c485cfbc7d282fb306c0be67c3284b1d2394
   sanitize (7.0.0) sha256=269d1b9d7326e69307723af5643ec032ff86ad616e72a3b36d301ac75a273984
   sass-embedded (1.104.0-aarch64-linux-gnu) sha256=99e2b95e8101928f8976c7a3f7cced5c5e4289ceb8aca0e1dedd9bb13645e417
   sass-embedded (1.104.0-aarch64-linux-musl) sha256=d54f9dc45e753d29a999021f24cfc126b49c61f14bcb8e96209a02288cde22c3

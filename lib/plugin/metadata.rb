@@ -1,12 +1,16 @@
 # frozen_string_literal: true
 
 # loaded really early
+require "active_support/core_ext/string/filters"
+require "json"
+
 module Plugin
 end
 
 class Plugin::Metadata
-  # from config/official_plugins.json
-  OFFICIAL_PLUGINS = Set.new(JSON.load_file(Rails.root.join("config/official_plugins.json").to_s))
+  # Relative to this file, so tools can parse plugin metadata without Rails.
+  OFFICIAL_PLUGINS =
+    Set.new(JSON.load_file(File.expand_path("../../config/official_plugins.json", __dir__)))
 
   FIELDS = %i[
     name
