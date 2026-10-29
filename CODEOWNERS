@@ -7,6 +7,5 @@
 /frontend/discourse/app/lib/plugin-api.gjs @discourse/dev-xp
 
 # Migrations tooling
-/migrations/ @discourse/migrations-tooling
 /script/bulk_import/ @discourse/migrations-tooling
 /script/import_scripts/ @discourse/migrations-tooling

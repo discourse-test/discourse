@@ -173,7 +173,6 @@ styleguide:
 migrations-tooling:
   - changed-files:
       - any-glob-to-any-file:
-          - migrations/**/*
           - script/bulk_import/**/*
           - script/import_scripts/**/*
 

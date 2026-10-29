@@ -279,13 +279,6 @@ gem "benchmark", require: false
 gem "iso8601"
 gem "rrule"
 
-group :migrations, optional: true do
-  gem "migrations-core", path: "migrations/core"
-  gem "migrations-tooling", path: "migrations/tooling"
-  gem "migrations-converters", path: "migrations/converters"
-  gem "migrations-importer", path: "migrations/importer"
-end
-
 gem "dry-initializer", "~> 3.1"
 
 gem "parallel"
